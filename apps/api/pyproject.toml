@@ -10,6 +10,8 @@ dependencies = [
     "sqlalchemy",
     "psycopg[binary]",
     "alembic",
+    "langdetect",
+    "google-play-scraper",
 ]
 
 [project.optional-dependencies]
@@ -30,3 +32,7 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+exclude = ["alembic*"]

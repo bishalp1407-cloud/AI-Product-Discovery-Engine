@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.core.logging import configure_logging, get_logger
+from app.api.feedback import router as feedback_router
 
 from app.core.config import get_settings
 
@@ -17,6 +18,7 @@ app = FastAPI(
     version=settings.app_version,
     debug=settings.debug,
 )
+app.include_router(feedback_router)
 
 logger.info("FastAPI application initialized.")
 

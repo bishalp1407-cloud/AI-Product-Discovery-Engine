@@ -34,4 +34,6 @@ htmlcov/
 .coverage
 
 # Build files
-build/
+build/**/*.egg-info/
+
+*.egg-info/
