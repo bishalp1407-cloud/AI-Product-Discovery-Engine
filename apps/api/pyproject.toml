@@ -13,7 +13,7 @@ dependencies = [
     "langdetect",
     "google-play-scraper",
     "app-reviews",
-    
+    "google-api-python-client",
 ]
 
 [project.optional-dependencies]
