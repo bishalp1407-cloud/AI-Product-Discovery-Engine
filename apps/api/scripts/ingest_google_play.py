@@ -3,8 +3,9 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.feedback_source import FeedbackSource, SourceStatus, SourceType
-from app.services.google_play_ingestion import ingest_google_play_reviews
-
+from app.services.google_play_ingestion import (
+    ingest_google_play_reviews_paginated,
+)
 
 db = SessionLocal()
 
@@ -50,13 +51,14 @@ try:
     print("Project ID:", project.id)
     print("Source ID:", source.id)
 
-    result = ingest_google_play_reviews(
-        db,
-        project_id=project.id,
-        source_id=source.id,
-        app_id="com.grofers.customerapp",
-        count=5,
-    )
+    result = result = ingest_google_play_reviews_paginated(
+    db,
+    project_id=project.id,
+    source_id=source.id,
+    app_id="com.grofers.customerapp",
+    target_count=500,
+    batch_size=100,
+)
 
     print("Ingestion result:", result)
 

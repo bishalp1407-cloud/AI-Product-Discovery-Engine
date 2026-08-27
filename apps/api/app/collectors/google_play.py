@@ -19,3 +19,22 @@ def collect_google_play_reviews(
     )
 
     return result
+
+def collect_google_play_review_page(
+    app_id: str,
+    *,
+    count: int = 100,
+    country: str = "in",
+    language: str = "en",
+    continuation_token=None,
+):
+    result, next_token = reviews(
+        app_id,
+        lang=language,
+        country=country,
+        sort=Sort.NEWEST,
+        count=count,
+        continuation_token=continuation_token,
+    )
+
+    return result, next_token

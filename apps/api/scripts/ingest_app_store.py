@@ -3,7 +3,9 @@ from sqlalchemy import select
 from app.db.session import SessionLocal
 from app.models.project import Project
 from app.models.feedback_source import FeedbackSource, SourceStatus, SourceType
-from app.services.app_store_ingestion import ingest_app_store_reviews
+from app.services.app_store_ingestion import (
+    ingest_app_store_reviews_paginated,
+)
 
 
 db = SessionLocal()
@@ -47,15 +49,18 @@ try:
     print("Project ID:", project.id)
     print("Source ID:", source.id)
 
-    result = ingest_app_store_reviews(
-        db,
-        project_id=project.id,
-        source_id=source.id,
-        app_id="960335206",
-        count=5,
-    )
+    result = ingest_app_store_reviews_paginated(
+    db,
+    project_id=project.id,
+    source_id=source.id,
+    app_id="960335206",
+    target_count=300,
+    country="in",
+)
 
     print("Ingestion result:", result)
 
 finally:
     db.close()
+
+

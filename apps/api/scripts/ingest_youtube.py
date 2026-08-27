@@ -42,13 +42,13 @@ try:
     print("Source ID:", source.id)
 
     result = ingest_youtube_feedback(
-        db,
-        project_id=project.id,
-        source_id=source.id,
-        query="Blinkit India",
-        top_videos=2,
-        comments_per_video=3,
-    )
+    db,
+    project_id=project.id,
+    source_id=source.id,
+    query="Blinkit India",
+    top_videos=5,
+    comments_per_video=60,
+)
 
     print("YouTube ingestion result:")
     print(result)

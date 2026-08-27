@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.adapters.youtube import adapt_youtube_comment
-from app.collectors.youtube import collect_youtube_comments
+from app.collectors.youtube import collect_youtube_comments_paginated
 from app.services.feedback_ingestion import ingest_feedback
 from app.services.youtube_video_discovery import discover_youtube_videos
 
@@ -31,9 +31,9 @@ def ingest_youtube_feedback(
     for video in videos:
         video_id = video["video_id"]
 
-        comments = collect_youtube_comments(
+        comments = collect_youtube_comments_paginated(
             video_id,
-            max_results=comments_per_video,
+            target_count=comments_per_video,
         )
 
         video_created = 0
