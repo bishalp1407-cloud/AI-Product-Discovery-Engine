@@ -12,6 +12,8 @@ dependencies = [
     "alembic",
     "langdetect",
     "google-play-scraper",
+    "app-reviews",
+    
 ]
 
 [project.optional-dependencies]
