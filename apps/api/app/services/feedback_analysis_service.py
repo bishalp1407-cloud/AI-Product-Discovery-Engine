@@ -16,7 +16,7 @@ from app.services.feedback_quality import evaluate_feedback_quality
 from app.services.openrouter_client import analyze_feedback_with_openrouter
 
 
-PROMPT_VERSION = "v2"
+PROMPT_VERSION = "v3"
 
 
 def analyze_and_store_feedback(
