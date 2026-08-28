@@ -12,11 +12,12 @@ ENV_FILE = BASE_DIR / ".env"
 class Settings(BaseSettings):
     app_name: str = "AI Product Discovery Engine API"
     app_version: str = "0.1.0"
-
     environment: str = "development"
     debug: bool = False
     database_url: str
     youtube_api_key: str
+    openrouter_api_key: str
+    openrouter_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE ,

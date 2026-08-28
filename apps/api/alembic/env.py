@@ -8,7 +8,7 @@ from app.db.base import Base
 from app.models.project import Project
 from app.models.feedback_source import FeedbackSource
 from app.models.feedback import Feedback
-
+from app.models.feedback_analysis import FeedbackAnalysis
 
 # Alembic Config object
 config = context.config
