@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     youtube_api_key: str
     openrouter_api_key: str
     openrouter_model: str = "nvidia/nemotron-3-ultra-550b-a55b:free"
+    openrouter_embedding_model: str | None = None
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE ,

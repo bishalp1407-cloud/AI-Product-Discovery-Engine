@@ -58,6 +58,196 @@ def repair_common_json_issues(
 
     return repaired
 
+def request_openrouter_completion(
+    *,
+    system_prompt: str,
+    user_prompt: str,
+    temperature: float = 0.1,
+) -> str:
+    """
+    Send a chat-completion request to OpenRouter and return
+    the raw model completion text.
+
+    This function owns provider-level concerns:
+    - authentication
+    - HTTP requests
+    - transient-error retries
+    - Retry-After handling
+    - embedded provider errors
+    - empty completion validation
+
+    Domain-specific parsing belongs to the caller.
+    """
+
+    settings = get_settings()
+
+    payload = {
+        "model": settings.openrouter_model,
+        "messages": [
+            {
+                "role": "system",
+                "content": system_prompt,
+            },
+            {
+                "role": "user",
+                "content": user_prompt,
+            },
+        ],
+        "temperature": temperature,
+    }
+
+    headers = {
+        "Authorization": (
+            f"Bearer {settings.openrouter_api_key}"
+        ),
+        "Content-Type": "application/json",
+    }
+
+    max_attempts = 5
+    data = None
+
+    with httpx.Client(timeout=60.0) as client:
+        for attempt in range(max_attempts):
+            try:
+                response = client.post(
+                    OPENROUTER_URL,
+                    headers=headers,
+                    json=payload,
+                )
+
+                # Normal HTTP-level transient errors.
+                if response.status_code in {429, 500, 502, 503, 504, 520}:
+                    if attempt == max_attempts - 1:
+                        response.raise_for_status()
+
+                    retry_after = response.headers.get(
+                        "Retry-After"
+                    )
+
+                    if retry_after:
+                        try:
+                            wait_seconds = float(
+                                retry_after
+                            )
+                        except ValueError:
+                            wait_seconds = min(
+                                2 ** attempt,
+                                20,
+                            )
+                    else:
+                        wait_seconds = min(
+                            2 ** attempt,
+                            20,
+                        )
+
+                    print(
+                        "OpenRouter temporary error "
+                        f"({response.status_code}). "
+                        "Retrying in "
+                        f"{wait_seconds}s..."
+                    )
+
+                    time.sleep(wait_seconds)
+                    continue
+
+                response.raise_for_status()
+
+                # Provider failures can occasionally arrive
+                # inside an HTTP 200 response.
+                data = response.json()
+
+                embedded_error = data.get("error")
+
+                if embedded_error:
+                    error_code = embedded_error.get(
+                        "code"
+                    )
+
+                    if error_code in {
+                        429,
+                        500,
+                        502,
+                        503,
+                        504,
+                    }:
+                        if attempt == max_attempts - 1:
+                            raise RuntimeError(
+                                "OpenRouter provider error "
+                                "after "
+                                f"{max_attempts} attempts: "
+                                f"{embedded_error}"
+                            )
+
+                        wait_seconds = min(
+                            2 ** attempt,
+                            20,
+                        )
+
+                        print(
+                            "OpenRouter embedded "
+                            "provider error "
+                            f"({error_code}). "
+                            "Retrying in "
+                            f"{wait_seconds}s..."
+                        )
+
+                        time.sleep(wait_seconds)
+                        continue
+
+                    raise RuntimeError(
+                        "OpenRouter provider error: "
+                        f"{embedded_error}"
+                    )
+
+                break
+
+            except httpx.RequestError:
+                if attempt == max_attempts - 1:
+                    raise
+
+                wait_seconds = min(
+                    2 ** attempt,
+                    20,
+                )
+
+                print(
+                    "OpenRouter network error. "
+                    "Retrying in "
+                    f"{wait_seconds}s..."
+                )
+
+                time.sleep(wait_seconds)
+
+    if data is None:
+        raise RuntimeError(
+            "OpenRouter returned no response data."
+        )
+
+    if "choices" not in data or not data["choices"]:
+        error_message = data.get(
+            "error",
+            data,
+        )
+
+        raise RuntimeError(
+            "OpenRouter returned no completion: "
+            f"{error_message}"
+        )
+
+    message = data["choices"][0].get(
+        "message",
+        {},
+    )
+
+    content = message.get("content")
+
+    if not content:
+        raise RuntimeError(
+            "OpenRouter returned an empty completion."
+        )
+
+    return content
+
 
 def analyze_feedback_with_openrouter(
     feedback_text: str,
@@ -245,13 +435,7 @@ Do not include explanations outside the JSON.
                 )
 
                 # Handle normal HTTP-level transient errors.
-                if response.status_code in {
-                    429,
-                    500,
-                    502,
-                    503,
-                    504,
-                }:
+                if response.status_code in { 500, 502, 503, 504, 520,521}:
                     if attempt == max_attempts - 1:
                         response.raise_for_status()
 
@@ -299,11 +483,13 @@ Do not include explanations outside the JSON.
                     )
 
                     if error_code in {
-                        429,
+                        
                         500,
                         502,
                         503,
                         504,
+                        520,
+                        521
                     }:
                         if attempt == max_attempts - 1:
                             raise RuntimeError(
