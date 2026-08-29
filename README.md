@@ -6,12 +6,6 @@
 
 🚧 **Currently under active development**
 
-### Completed Milestones
-
-* ✅ Milestone 0 — Product & System Architecture
-* ✅ Milestone 1 — Repository & Development Environment (In Progress)
-
----
 
 # Vision
 
