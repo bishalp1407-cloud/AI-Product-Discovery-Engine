@@ -38,12 +38,12 @@ This project is **not** a chatbot or sentiment analysis tool. It is an AI-powere
 * FastAPI
 * Python
 
-## Database *(Upcoming)*
+## Database 
 
 * PostgreSQL
 * pgvector
 
-## AI *(Upcoming)*
+## AI 
 
 * OpenRouter API
 
