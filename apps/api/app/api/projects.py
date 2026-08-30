@@ -20,6 +20,16 @@ from app.schemas.project_sync import (
     SourceSyncResponse,
 )
 from app.services.project_sync_service import sync_project
+from app.schemas.project_analytics import (
+    DistributionItem,
+    FeedbackTrendItem,
+    ProjectAnalyticsResponse,
+    RecentFeedbackItem,
+    SourceAnalyticsItem,
+)
+from app.services.project_analytics_service import get_project_analytics
+
+
 
 router = APIRouter(
     prefix="/projects",
@@ -186,5 +196,72 @@ def sync_project_feedback(
                 error=source.error,
             )
             for source in result.sources
+        ],
+    )
+@router.get(
+    "/{project_id}/analytics",
+    response_model=ProjectAnalyticsResponse,
+)
+def read_project_analytics(
+    project_id: UUID,
+    days: int = Query(default=30, ge=1, le=365),
+    recent_limit: int = Query(default=10, ge=1, le=100),
+    db: Session = Depends(get_db),
+) -> ProjectAnalyticsResponse:
+    analytics = get_project_analytics(
+        db,
+        project_id=project_id,
+        days=days,
+        recent_limit=recent_limit,
+    )
+
+    if analytics is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Project not found",
+        )
+
+    return ProjectAnalyticsResponse(
+        project_id=analytics.project_id,
+        relevant_feedback=analytics.relevant_feedback,
+        sentiment_distribution=[
+            DistributionItem(
+                name=item.name,
+                count=item.count,
+            )
+            for item in analytics.sentiment_distribution
+        ],
+        category_distribution=[
+            DistributionItem(
+                name=item.name,
+                count=item.count,
+            )
+            for item in analytics.category_distribution
+        ],
+        source_breakdown=[
+            SourceAnalyticsItem(
+                source_type=item.source_type,
+                count=item.count,
+            )
+            for item in analytics.source_breakdown
+        ],
+        feedback_trend=[
+            FeedbackTrendItem(
+                date=item.date,
+                count=item.count,
+            )
+            for item in analytics.feedback_trend
+        ],
+        recent_feedback=[
+            RecentFeedbackItem(
+                feedback_id=item.feedback_id,
+                source_type=item.source_type,
+                raw_text=item.raw_text,
+                sentiment=item.sentiment,
+                category=item.category,
+                severity=item.severity,
+                source_created_at=item.source_created_at,
+            )
+            for item in analytics.recent_feedback
         ],
     )
