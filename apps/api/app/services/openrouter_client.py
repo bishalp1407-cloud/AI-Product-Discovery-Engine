@@ -1,14 +1,27 @@
 import json
+import re
 import time
 
 import httpx
-import re
 
 from app.core.config import get_settings
 from app.schemas.feedback_analysis import FeedbackAnalysisResult
 
 
 OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+
+TRANSIENT_STATUS_CODES = {
+    429,
+    500,
+    502,
+    503,
+    504,
+    520,
+    521,
+}
+
+MAX_ATTEMPTS = 5
+
 
 def repair_common_json_issues(
     content: str,
@@ -29,10 +42,6 @@ def repair_common_json_issues(
             repaired,
         )
 
-    # Repair unquoted enum values such as:
-    # "sentiment": positive
-    # "severity": medium
-    # "is_relevant": true is already valid JSON
     enum_values = (
         "positive",
         "neutral",
@@ -58,6 +67,20 @@ def repair_common_json_issues(
 
     return repaired
 
+
+def _retry_delay(
+    attempt: int,
+    retry_after: str | None = None,
+) -> float:
+    if retry_after:
+        try:
+            return min(float(retry_after), 20.0)
+        except ValueError:
+            pass
+
+    return float(min(2 ** attempt, 20))
+
+
 def request_openrouter_completion(
     *,
     system_prompt: str,
@@ -65,21 +88,22 @@ def request_openrouter_completion(
     temperature: float = 0.1,
 ) -> str:
     """
-    Send a chat-completion request to OpenRouter and return
-    the raw model completion text.
+    Send one OpenRouter completion request.
 
-    This function owns provider-level concerns:
+    Owns provider-level concerns:
     - authentication
-    - HTTP requests
-    - transient-error retries
+    - HTTP timeout
+    - transient retries
     - Retry-After handling
     - embedded provider errors
-    - empty completion validation
-
-    Domain-specific parsing belongs to the caller.
+    - response validation
     """
-
     settings = get_settings()
+
+    if not settings.openrouter_api_key:
+        raise RuntimeError(
+            "OPENROUTER_API_KEY is required for AI analysis."
+        )
 
     payload = {
         "model": settings.openrouter_model,
@@ -103,11 +127,15 @@ def request_openrouter_completion(
         "Content-Type": "application/json",
     }
 
-    max_attempts = 5
-    data = None
+    timeout = httpx.Timeout(
+        connect=10.0,
+        read=60.0,
+        write=20.0,
+        pool=10.0,
+    )
 
-    with httpx.Client(timeout=60.0) as client:
-        for attempt in range(max_attempts):
+    with httpx.Client(timeout=timeout) as client:
+        for attempt in range(MAX_ATTEMPTS):
             try:
                 response = client.post(
                     OPENROUTER_URL,
@@ -115,36 +143,24 @@ def request_openrouter_completion(
                     json=payload,
                 )
 
-                # Normal HTTP-level transient errors.
-                if response.status_code in {429, 500, 502, 503, 504, 520}:
-                    if attempt == max_attempts - 1:
+                if (
+                    response.status_code
+                    in TRANSIENT_STATUS_CODES
+                ):
+                    if attempt == MAX_ATTEMPTS - 1:
                         response.raise_for_status()
 
-                    retry_after = response.headers.get(
-                        "Retry-After"
+                    wait_seconds = _retry_delay(
+                        attempt,
+                        response.headers.get(
+                            "Retry-After"
+                        ),
                     )
-
-                    if retry_after:
-                        try:
-                            wait_seconds = float(
-                                retry_after
-                            )
-                        except ValueError:
-                            wait_seconds = min(
-                                2 ** attempt,
-                                20,
-                            )
-                    else:
-                        wait_seconds = min(
-                            2 ** attempt,
-                            20,
-                        )
 
                     print(
                         "OpenRouter temporary error "
                         f"({response.status_code}). "
-                        "Retrying in "
-                        f"{wait_seconds}s..."
+                        f"Retrying in {wait_seconds}s..."
                     )
 
                     time.sleep(wait_seconds)
@@ -152,8 +168,6 @@ def request_openrouter_completion(
 
                 response.raise_for_status()
 
-                # Provider failures can occasionally arrive
-                # inside an HTTP 200 response.
                 data = response.json()
 
                 embedded_error = data.get("error")
@@ -163,24 +177,29 @@ def request_openrouter_completion(
                         "code"
                     )
 
-                    if error_code in {
-                        429,
-                        500,
-                        502,
-                        503,
-                        504,
-                    }:
-                        if attempt == max_attempts - 1:
+                    try:
+                        error_code = int(error_code)
+                    except (TypeError, ValueError):
+                        pass
+
+                    if (
+                        error_code
+                        in TRANSIENT_STATUS_CODES
+                    ):
+                        if (
+                            attempt
+                            == MAX_ATTEMPTS - 1
+                        ):
                             raise RuntimeError(
-                                "OpenRouter provider error "
-                                "after "
-                                f"{max_attempts} attempts: "
+                                "OpenRouter provider "
+                                "error after "
+                                f"{MAX_ATTEMPTS} "
+                                "attempts: "
                                 f"{embedded_error}"
                             )
 
-                        wait_seconds = min(
-                            2 ** attempt,
-                            20,
+                        wait_seconds = _retry_delay(
+                            attempt
                         )
 
                         print(
@@ -199,15 +218,35 @@ def request_openrouter_completion(
                         f"{embedded_error}"
                     )
 
-                break
+                choices = data.get("choices")
+
+                if not choices:
+                    raise RuntimeError(
+                        "OpenRouter returned "
+                        "no completion."
+                    )
+
+                message = choices[0].get(
+                    "message",
+                    {},
+                )
+
+                content = message.get("content")
+
+                if not content:
+                    raise RuntimeError(
+                        "OpenRouter returned "
+                        "an empty completion."
+                    )
+
+                return content
 
             except httpx.RequestError:
-                if attempt == max_attempts - 1:
+                if attempt == MAX_ATTEMPTS - 1:
                     raise
 
-                wait_seconds = min(
-                    2 ** attempt,
-                    20,
+                wait_seconds = _retry_delay(
+                    attempt
                 )
 
                 print(
@@ -218,42 +257,15 @@ def request_openrouter_completion(
 
                 time.sleep(wait_seconds)
 
-    if data is None:
-        raise RuntimeError(
-            "OpenRouter returned no response data."
-        )
-
-    if "choices" not in data or not data["choices"]:
-        error_message = data.get(
-            "error",
-            data,
-        )
-
-        raise RuntimeError(
-            "OpenRouter returned no completion: "
-            f"{error_message}"
-        )
-
-    message = data["choices"][0].get(
-        "message",
-        {},
+    raise RuntimeError(
+        "OpenRouter request failed unexpectedly."
     )
-
-    content = message.get("content")
-
-    if not content:
-        raise RuntimeError(
-            "OpenRouter returned an empty completion."
-        )
-
-    return content
 
 
 def analyze_feedback_with_openrouter(
     feedback_text: str,
     source_type: str | None = None,
 ) -> FeedbackAnalysisResult:
-    settings = get_settings()
 
     system_prompt = """
 You are a product feedback analyst analyzing customer feedback for a consumer product.
@@ -397,177 +409,14 @@ Do not include markdown.
 Do not include explanations outside the JSON.
 """.strip()
 
-    payload = {
-        "model": settings.openrouter_model,
-        "messages": [
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": (
-                    f"Source: {source_type or 'unknown'}\n"
-                    f"Feedback: {feedback_text}"
-                ),
-            },
-        ],
-        "temperature": 0.1,
-    }
-
-    headers = {
-        "Authorization": (
-            f"Bearer {settings.openrouter_api_key}"
+    content = request_openrouter_completion(
+        system_prompt=system_prompt,
+        user_prompt=(
+            f"Source: {source_type or 'unknown'}\n"
+            f"Feedback: {feedback_text}"
         ),
-        "Content-Type": "application/json",
-    }
-
-    max_attempts = 5
-    data = None
-
-    with httpx.Client(timeout=60.0) as client:
-        for attempt in range(max_attempts):
-            try:
-                response = client.post(
-                    OPENROUTER_URL,
-                    headers=headers,
-                    json=payload,
-                )
-
-                # Handle normal HTTP-level transient errors.
-                if response.status_code in { 500, 502, 503, 504, 520,521}:
-                    if attempt == max_attempts - 1:
-                        response.raise_for_status()
-
-                    retry_after = response.headers.get(
-                        "Retry-After"
-                    )
-
-                    if retry_after:
-                        try:
-                            wait_seconds = float(
-                                retry_after
-                            )
-                        except ValueError:
-                            wait_seconds = min(
-                                2 ** attempt,
-                                20,
-                            )
-                    else:
-                        wait_seconds = min(
-                            2 ** attempt,
-                            20,
-                        )
-
-                    print(
-                        "OpenRouter temporary error "
-                        f"({response.status_code}). "
-                        "Retrying in "
-                        f"{wait_seconds}s..."
-                    )
-
-                    time.sleep(wait_seconds)
-                    continue
-
-                response.raise_for_status()
-
-                # OpenRouter/provider failures can occasionally
-                # arrive inside a successful HTTP response.
-                data = response.json()
-
-                embedded_error = data.get("error")
-
-                if embedded_error:
-                    error_code = embedded_error.get(
-                        "code"
-                    )
-
-                    if error_code in {
-                        
-                        500,
-                        502,
-                        503,
-                        504,
-                        520,
-                        521
-                    }:
-                        if attempt == max_attempts - 1:
-                            raise RuntimeError(
-                                "OpenRouter provider error "
-                                "after "
-                                f"{max_attempts} attempts: "
-                                f"{embedded_error}"
-                            )
-
-                        wait_seconds = min(
-                            2 ** attempt,
-                            20,
-                        )
-
-                        print(
-                            "OpenRouter embedded "
-                            "provider error "
-                            f"({error_code}). "
-                            "Retrying in "
-                            f"{wait_seconds}s..."
-                        )
-
-                        time.sleep(wait_seconds)
-                        continue
-
-                    raise RuntimeError(
-                        "OpenRouter provider error: "
-                        f"{embedded_error}"
-                    )
-
-                # HTTP request and provider response
-                # were both successful.
-                break
-
-            except httpx.RequestError:
-                if attempt == max_attempts - 1:
-                    raise
-
-                wait_seconds = min(
-                    2 ** attempt,
-                    20,
-                )
-
-                print(
-                    "OpenRouter network error. "
-                    "Retrying in "
-                    f"{wait_seconds}s..."
-                )
-
-                time.sleep(wait_seconds)
-
-    if data is None:
-        raise RuntimeError(
-            "OpenRouter returned no response data."
-        )
-
-    if "choices" not in data or not data["choices"]:
-        error_message = data.get(
-            "error",
-            data,
-        )
-
-        raise RuntimeError(
-            "OpenRouter returned no completion: "
-            f"{error_message}"
-        )
-
-    message = data["choices"][0].get(
-        "message",
-        {},
+        temperature=0.1,
     )
-
-    content = message.get("content")
-
-    if not content:
-        raise RuntimeError(
-            "OpenRouter returned an empty completion."
-        )
 
     try:
         parsed = json.loads(content)
@@ -578,20 +427,19 @@ Do not include explanations outside the JSON.
         )
 
         try:
-            parsed = json.loads(repaired_content)
+            parsed = json.loads(
+                repaired_content
+            )
 
         except json.JSONDecodeError as exc:
             raise RuntimeError(
                 "OpenRouter returned invalid JSON. "
                 f"Raw content: {content!r}. "
-                f"Repaired content: {repaired_content!r}. "
+                "Repaired content: "
+                f"{repaired_content!r}. "
                 f"Parse error: {exc}"
             ) from exc
 
-    result = FeedbackAnalysisResult.model_validate(
+    return FeedbackAnalysisResult.model_validate(
         parsed
     )
-
-    time.sleep(0.5)
-
-    return result

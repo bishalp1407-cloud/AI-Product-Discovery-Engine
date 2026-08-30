@@ -3,7 +3,10 @@ import uuid
 from sqlalchemy.orm import Session
 
 from app.adapters.google_play import adapt_google_play_review
-from app.collectors.google_play import collect_google_play_reviews
+from app.collectors.google_play import (
+    collect_google_play_review_page,
+    collect_google_play_reviews,
+)
 from app.services.feedback_ingestion import ingest_feedback
 
 
@@ -23,26 +26,35 @@ def ingest_google_play_reviews(
     created = 0
     duplicates = 0
 
-    for review in reviews:
-        payload = adapt_google_play_review(review)
+    try:
+        for review in reviews:
+            payload = adapt_google_play_review(review)
 
-        feedback = ingest_feedback(
-            db,
-            project_id=project_id,
-            source_id=source_id,
-            payload=payload,
-        )
+            feedback = ingest_feedback(
+                db,
+                project_id=project_id,
+                source_id=source_id,
+                payload=payload,
+                commit=False,
+            )
 
-        if feedback is None:
-            duplicates += 1
-        else:
-            created += 1
+            if feedback is None:
+                duplicates += 1
+            else:
+                created += 1
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "fetched": len(reviews),
         "created": created,
         "duplicates": duplicates,
     }
+
 
 def ingest_google_play_reviews_paginated(
     db: Session,
@@ -55,8 +67,6 @@ def ingest_google_play_reviews_paginated(
     country: str = "in",
     language: str = "en",
 ) -> dict[str, int]:
-    from app.collectors.google_play import collect_google_play_review_page
-
     fetched = 0
     created = 0
     duplicates = 0
@@ -77,20 +87,29 @@ def ingest_google_play_reviews_paginated(
         if not reviews:
             break
 
-        for review in reviews:
-            payload = adapt_google_play_review(review)
+        try:
+            for review in reviews:
+                payload = adapt_google_play_review(review)
 
-            feedback = ingest_feedback(
-                db,
-                project_id=project_id,
-                source_id=source_id,
-                payload=payload,
-            )
+                feedback = ingest_feedback(
+                    db,
+                    project_id=project_id,
+                    source_id=source_id,
+                    payload=payload,
+                    commit=False,
+                )
 
-            if feedback is None:
-                duplicates += 1
-            else:
-                created += 1
+                if feedback is None:
+                    duplicates += 1
+                else:
+                    created += 1
+
+            # One transaction per fetched page instead of one per review.
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
 
         fetched += len(reviews)
 

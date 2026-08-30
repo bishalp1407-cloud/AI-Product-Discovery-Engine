@@ -40,3 +40,4 @@ def get_settings() -> Settings:
     in the local .env file.
     """
     return Settings()
+

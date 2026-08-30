@@ -16,7 +16,7 @@ def ingest_app_store_reviews(
     project_id: uuid.UUID,
     source_id: uuid.UUID,
     app_id: str,
-    count: int = 20,
+    count: int = 100,
 ) -> dict[str, int]:
     reviews = collect_app_store_reviews(
         app_id,
@@ -26,20 +26,28 @@ def ingest_app_store_reviews(
     created = 0
     duplicates = 0
 
-    for review in reviews:
-        payload = adapt_app_store_review(review)
+    try:
+        for review in reviews:
+            payload = adapt_app_store_review(review)
 
-        feedback = ingest_feedback(
-            db,
-            project_id=project_id,
-            source_id=source_id,
-            payload=payload,
-        )
+            feedback = ingest_feedback(
+                db,
+                project_id=project_id,
+                source_id=source_id,
+                payload=payload,
+                commit=False,
+            )
 
-        if feedback is None:
-            duplicates += 1
-        else:
-            created += 1
+            if feedback is None:
+                duplicates += 1
+            else:
+                created += 1
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
 
     return {
         "fetched": len(reviews),

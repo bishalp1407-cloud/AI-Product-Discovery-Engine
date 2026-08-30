@@ -39,24 +39,33 @@ def ingest_youtube_feedback(
         video_created = 0
         video_duplicates = 0
 
-        for comment in comments:
-            payload = adapt_youtube_comment(comment)
+        try:
+            for comment in comments:
+                payload = adapt_youtube_comment(comment)
 
-            feedback = ingest_feedback(
-                db,
-                project_id=project_id,
-                source_id=source_id,
-                payload=payload,
-            )
+                feedback = ingest_feedback(
+                    db,
+                    project_id=project_id,
+                    source_id=source_id,
+                    payload=payload,
+                    commit=False,
+                )
 
-            fetched += 1
+                fetched += 1
 
-            if feedback is None:
-                duplicates += 1
-                video_duplicates += 1
-            else:
-                created += 1
-                video_created += 1
+                if feedback is None:
+                    duplicates += 1
+                    video_duplicates += 1
+                else:
+                    created += 1
+                    video_created += 1
+
+            # Commit once per video instead of once per comment.
+            db.commit()
+
+        except Exception:
+            db.rollback()
+            raise
 
         video_results.append(
             {
@@ -66,6 +75,12 @@ def ingest_youtube_feedback(
                 "created": video_created,
                 "duplicates": video_duplicates,
             }
+        )
+
+        print(
+            f"YouTube progress: {fetched} comments fetched | "
+            f"{created} created | "
+            f"{duplicates} duplicates"
         )
 
     return {

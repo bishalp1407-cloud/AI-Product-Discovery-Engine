@@ -1,17 +1,15 @@
 import uuid
 
-from sqlalchemy.orm import Session
-
-from app.models.feedback import Feedback, ProcessingStatus
-from app.schemas.feedback import FeedbackIngest
-from app.services.content_hash import generate_content_hash
-from app.services.deduplication import feedback_exists
-from app.services.text_normalization import normalize_text
-from app.services.language_detection import detect_language
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.models.feedback import Feedback, ProcessingStatus
 from app.models.feedback_source import FeedbackSource
+from app.schemas.feedback import FeedbackIngest
+from app.services.content_hash import generate_content_hash
+from app.services.deduplication import feedback_exists
+from app.services.language_detection import detect_language
+from app.services.text_normalization import normalize_text
 
 
 def ingest_feedback(
@@ -20,6 +18,7 @@ def ingest_feedback(
     project_id: uuid.UUID,
     source_id: uuid.UUID,
     payload: FeedbackIngest,
+    commit: bool = True,
 ) -> Feedback | None:
     source = db.execute(
         select(FeedbackSource).where(
@@ -42,7 +41,6 @@ def ingest_feedback(
 
     normalized_text = normalize_text(payload.text)
     content_hash = generate_content_hash(normalized_text)
-
     language = detect_language(payload.text)
 
     feedback = Feedback(
@@ -60,7 +58,9 @@ def ingest_feedback(
     )
 
     db.add(feedback)
-    db.commit()
-    db.refresh(feedback)
+
+    if commit:
+        db.commit()
+        db.refresh(feedback)
 
     return feedback
