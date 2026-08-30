@@ -1,3 +1,5 @@
+import Link from "next/link";
+
 export type RankedInsight = {
   id: string;
   rank: number;
@@ -52,61 +54,70 @@ export default function RankedInsights({
 
       <div className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
         {insights.items.map((insight) => (
-          <article
+          <Link
             key={insight.id}
-            className="border-b border-zinc-100 p-6 last:border-b-0"
+            href={`/insights/${insight.id}`}
+            className="block border-b border-zinc-100 p-6 transition hover:bg-zinc-50 last:border-b-0"
           >
-            <div className="flex gap-5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-sm font-semibold text-white">
-                {insight.rank}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-semibold text-zinc-900">
-                    {insight.title}
-                  </h3>
-
-                  <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600">
-                    {formatLabel(insight.category)}
-                  </span>
+            <article>
+              <div className="flex gap-5">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-zinc-900 text-sm font-semibold text-white">
+                  {insight.rank}
                 </div>
 
-                {insight.description && (
-                  <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600">
-                    {insight.description}
-                  </p>
-                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="font-semibold text-zinc-900">
+                      {insight.title}
+                    </h3>
 
-                <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-                  <InsightMetric
-                    label="Evidence"
-                    value={`${insight.feedback_count}`}
-                  />
+                    <span className="rounded-full bg-zinc-100 px-2.5 py-1 text-xs font-medium text-zinc-600">
+                      {formatLabel(insight.category)}
+                    </span>
+                  </div>
 
-                  <InsightMetric
-                    label="Reach"
-                    value={`${(insight.reach * 100).toFixed(1)}%`}
-                  />
+                  {insight.description && (
+                    <p className="mt-2 max-w-4xl text-sm leading-6 text-zinc-600">
+                      {insight.description}
+                    </p>
+                  )}
 
-                  <InsightMetric
-                    label="Impact"
-                    value={insight.impact.toFixed(1)}
-                  />
+                  <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+                    <InsightMetric
+                      label="Evidence"
+                      value={`${insight.feedback_count}`}
+                    />
 
-                  <InsightMetric
-                    label="Confidence"
-                    value={`${Math.round(insight.confidence * 100)}%`}
-                  />
+                    <InsightMetric
+                      label="Reach"
+                      value={`${(insight.reach * 100).toFixed(1)}%`}
+                    />
 
-                  <InsightMetric
-                    label="Priority score"
-                    value={(insight.opportunity_score * 100).toFixed(2)}
-                  />
+                    <InsightMetric
+                      label="Impact"
+                      value={insight.impact.toFixed(1)}
+                    />
+
+                    <InsightMetric
+                      label="Confidence"
+                      value={`${Math.round(insight.confidence * 100)}%`}
+                    />
+
+                    <InsightMetric
+                      label="Priority score"
+                      value={(insight.opportunity_score * 100).toFixed(2)}
+                    />
+                  </div>
+
+                  <div className="mt-5 flex items-center justify-end">
+                    <span className="text-sm font-medium text-zinc-700">
+                      View evidence →
+                    </span>
+                  </div>
                 </div>
               </div>
-            </div>
-          </article>
+            </article>
+          </Link>
         ))}
 
         {insights.items.length === 0 && (
