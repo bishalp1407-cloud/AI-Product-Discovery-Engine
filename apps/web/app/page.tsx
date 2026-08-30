@@ -1,3 +1,7 @@
+import AnalyticsDashboard, {
+  ProjectAnalytics,
+} from "../components/analytics-dashboard";
+
 const API_BASE_URL =
   process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -29,8 +33,28 @@ async function getProjectOverview(): Promise<ProjectOverview> {
   return response.json();
 }
 
+async function getProjectAnalytics(): Promise<ProjectAnalytics> {
+  const response = await fetch(
+    `${API_BASE_URL}/projects/${PROJECT_ID}/analytics?days=30&recent_limit=10`,
+    {
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to load project analytics: ${response.status}`,
+    );
+  }
+
+  return response.json();
+}
+
 export default async function Home() {
-  const overview = await getProjectOverview();
+  const [overview, analytics] = await Promise.all([
+    getProjectOverview(),
+    getProjectAnalytics(),
+  ]);
 
   const relevanceRate =
     overview.total_feedback > 0
@@ -41,12 +65,14 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
+      {/* Top navigation */}
       <div className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
             <p className="text-sm font-semibold text-zinc-900">
               AI Product Discovery Engine
             </p>
+
             <p className="text-xs text-zinc-500">
               Feedback intelligence workspace
             </p>
@@ -63,6 +89,7 @@ export default async function Home() {
       </div>
 
       <div className="mx-auto max-w-7xl px-6 py-10">
+        {/* Project heading */}
         <section className="mb-10">
           <p className="mb-2 text-sm font-medium text-zinc-500">
             Project
@@ -79,6 +106,7 @@ export default async function Home() {
           </p>
         </section>
 
+        {/* Overview metrics */}
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total feedback"
@@ -105,6 +133,7 @@ export default async function Home() {
           />
         </section>
 
+        {/* Prioritized issues + project health */}
         <section className="mt-10 grid gap-6 lg:grid-cols-[1.7fr_1fr]">
           <div className="rounded-xl border border-zinc-200 bg-white">
             <div className="border-b border-zinc-100 px-6 py-5">
@@ -113,6 +142,7 @@ export default async function Home() {
                   <h2 className="font-semibold text-zinc-900">
                     Prioritized issues
                   </h2>
+
                   <p className="mt-1 text-sm text-zinc-500">
                     Highest-impact recurring customer problems
                   </p>
@@ -172,6 +202,9 @@ export default async function Home() {
             </div>
           </div>
         </section>
+
+        {/* Analytics */}
+        <AnalyticsDashboard analytics={analytics} />
       </div>
     </main>
   );
