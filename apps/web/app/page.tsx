@@ -89,36 +89,47 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      <div className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
-          <div>
-            <p className="text-sm font-semibold text-zinc-900">
+      <header className="sticky top-0 z-40 border-b border-zinc-200 bg-white/95 backdrop-blur">
+        <div className="mx-auto flex max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-zinc-900">
               AI Product Discovery Engine
             </p>
 
-            <p className="text-xs text-zinc-500">
+            <p className="mt-0.5 text-xs text-zinc-500">
               Feedback intelligence workspace
             </p>
           </div>
 
-          <SyncButton projectId={PROJECT_ID} />
+          <div className="self-start sm:self-auto">
+            <SyncButton projectId={PROJECT_ID} />
+          </div>
         </div>
-      </div>
+      </header>
 
-      <div className="mx-auto max-w-6xl px-6 py-10">
-        <section>
-          <p className="text-sm font-medium text-zinc-500">
-            Project
-          </p>
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6 sm:py-10">
+        <section className="border-b border-zinc-200 pb-8">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.16em] text-zinc-500">
+                Project
+              </p>
 
-          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-950">
-            {overview.project_name}
-          </h1>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl">
+                {overview.project_name}
+              </h1>
 
-          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600">
-            Understand what customers are saying, identify recurring
-            problems, and prioritize the issues worth investigating.
-          </p>
+              <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600 sm:text-base">
+                Understand what customers are saying, identify recurring
+                problems, and prioritize the issues worth investigating.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 text-xs text-zinc-500">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              {overview.source_count} connected sources
+            </div>
+          </div>
         </section>
 
         <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -147,10 +158,14 @@ export default async function Home() {
           />
         </section>
 
-        <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+        <section className="mt-8 rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm sm:p-6">
           <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
             <div>
-              <h2 className="font-semibold text-zinc-900">
+              <p className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+                Analysis coverage
+              </p>
+
+              <h2 className="mt-1 font-semibold text-zinc-900">
                 Project health
               </h2>
 
@@ -159,33 +174,33 @@ export default async function Home() {
               </p>
             </div>
 
-            <div className="text-left sm:text-right">
-              <p className="text-2xl font-semibold text-zinc-900">
+            <div className="sm:text-right">
+              <p className="text-3xl font-semibold tracking-tight text-zinc-900">
                 {relevanceRate}%
               </p>
 
-              <p className="text-xs text-zinc-500">
+              <p className="mt-1 text-xs text-zinc-500">
                 relevance rate
               </p>
             </div>
           </div>
 
-          <div className="mt-5 h-2 overflow-hidden rounded-full bg-zinc-100">
+          <div className="mt-6 h-2.5 overflow-hidden rounded-full bg-zinc-100">
             <div
-              className="h-full rounded-full bg-zinc-900 transition-all"
+              className="h-full rounded-full bg-zinc-900 transition-all duration-500"
               style={{
                 width: `${Math.min(relevanceRate, 100)}%`,
               }}
             />
           </div>
 
-          <div className="mt-3 flex justify-between text-xs text-zinc-500">
+          <div className="mt-3 flex flex-col gap-1 text-xs text-zinc-500 sm:flex-row sm:justify-between">
             <span>
-              {overview.relevant_feedback.toLocaleString()} relevant
+              {overview.relevant_feedback.toLocaleString()} relevant feedback
             </span>
 
             <span>
-              {overview.total_feedback.toLocaleString()} total
+              {overview.total_feedback.toLocaleString()} total feedback
             </span>
           </div>
         </section>
@@ -208,16 +223,16 @@ function MetricCard({
   helper: string;
 }) {
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
-      <p className="text-sm text-zinc-500">
+    <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+      <p className="text-sm font-medium text-zinc-500">
         {label}
       </p>
 
-      <p className="mt-2 text-2xl font-semibold text-zinc-900">
+      <p className="mt-3 text-3xl font-semibold tracking-tight text-zinc-900">
         {value}
       </p>
 
-      <p className="mt-2 text-xs text-zinc-500">
+      <p className="mt-2 text-xs leading-5 text-zinc-500">
         {helper}
       </p>
     </div>

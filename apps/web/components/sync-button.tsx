@@ -129,8 +129,8 @@ export default function SyncButton({
           }
 
           setMessage(
-            `Sync complete · ${result.feedback_created} new feedback · ${result.analyses_completed} analyzed · ${result.insights_created} insights`,
-          );
+            `Sync complete · ${result.feedback_created} new feedback · ${result.analyses_completed} analyzed · ${result.insights_created} prioritized issues`,
+        );
 
           router.refresh();
           break;
