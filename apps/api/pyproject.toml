@@ -3,6 +3,7 @@ name = "ai-product-discovery-api"
 version = "0.1.0"
 description = "Backend API for the AI Product Discovery Engine"
 requires-python = ">=3.12,<3.13"
+
 dependencies = [
     "fastapi",
     "uvicorn[standard]",
@@ -10,15 +11,17 @@ dependencies = [
     "sqlalchemy",
     "psycopg[binary]",
     "alembic",
+    "httpx",
     "langdetect",
     "google-play-scraper",
     "app-reviews",
     "google-api-python-client",
+    "sentence-transformers",
+    "scikit-learn",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "httpx",
     "pytest",
     "pytest-asyncio",
     "ruff",
