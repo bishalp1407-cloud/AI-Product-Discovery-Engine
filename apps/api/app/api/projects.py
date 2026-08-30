@@ -1,6 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -12,14 +19,20 @@ from app.schemas.insight_api import (
     InsightSourceBreakdown,
 )
 from app.schemas.project_overview import ProjectOverviewResponse
-from app.services.insight_api_service import get_ranked_insights
-from app.services.insight_detail_service import get_insight_detail
-from app.services.project_overview_service import get_project_overview
 from app.schemas.project_sync import (
     ProjectSyncResponse,
     SourceSyncResponse,
+    SyncJobCreatedResponse,
+    SyncJobStatusResponse,
 )
-from app.services.project_sync_service import sync_project
+from app.services.insight_api_service import get_ranked_insights
+from app.services.insight_detail_service import get_insight_detail
+from app.services.project_overview_service import get_project_overview
+from app.services.sync_job_service import (
+    create_sync_job,
+    get_sync_job,
+    run_sync_job,
+)
 from app.schemas.project_analytics import (
     DistributionItem,
     FeedbackTrendItem,
@@ -28,7 +41,6 @@ from app.schemas.project_analytics import (
     SourceAnalyticsItem,
 )
 from app.services.project_analytics_service import get_project_analytics
-
 
 
 router = APIRouter(
@@ -159,45 +171,93 @@ def read_insight_detail(
 
 @router.post(
     "/{project_id}/sync",
-    response_model=ProjectSyncResponse,
+    response_model=SyncJobCreatedResponse,
+    status_code=status.HTTP_202_ACCEPTED,
 )
 def sync_project_feedback(
     project_id: UUID,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
-) -> ProjectSyncResponse:
-    result = sync_project(
+) -> SyncJobCreatedResponse:
+    project = get_project_overview(
         db,
         project_id=project_id,
     )
 
-    if result is None:
+    if project is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Project not found",
         )
 
-    return ProjectSyncResponse(
-        project_id=result.project_id,
-        sources_synced=result.sources_synced,
-        feedback_fetched=result.feedback_fetched,
-        feedback_created=result.feedback_created,
-        duplicates=result.duplicates,
-        analyses_completed=result.analyses_completed,
-        analyses_failed=result.analyses_failed,
-        insights_created=result.insights_created,
-        sources=[
-            SourceSyncResponse(
-                source_id=source.source_id,
-                source_name=source.source_name,
-                source_type=source.source_type,
-                fetched=source.fetched,
-                created=source.created,
-                duplicates=source.duplicates,
-                error=source.error,
-            )
-            for source in result.sources
-        ],
+    job = create_sync_job(
+        project_id=project_id,
     )
+
+    background_tasks.add_task(
+        run_sync_job,
+        job_id=job.id,
+    )
+
+    return SyncJobCreatedResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status.value,
+    )
+
+@router.get(
+    "/{project_id}/sync/{job_id}",
+    response_model=SyncJobStatusResponse,
+)
+def read_sync_job_status(
+    project_id: UUID,
+    job_id: UUID,
+) -> SyncJobStatusResponse:
+    job = get_sync_job(job_id)
+
+    if job is None or job.project_id != project_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sync job not found",
+        )
+
+    result = None
+
+    if job.result is not None:
+        result = ProjectSyncResponse(
+            project_id=job.result.project_id,
+            sources_synced=job.result.sources_synced,
+            feedback_fetched=job.result.feedback_fetched,
+            feedback_created=job.result.feedback_created,
+            duplicates=job.result.duplicates,
+            analyses_completed=job.result.analyses_completed,
+            analyses_failed=job.result.analyses_failed,
+            insights_created=job.result.insights_created,
+            sources=[
+                SourceSyncResponse(
+                    source_id=source.source_id,
+                    source_name=source.source_name,
+                    source_type=source.source_type,
+                    fetched=source.fetched,
+                    created=source.created,
+                    duplicates=source.duplicates,
+                    error=source.error,
+                )
+                for source in job.result.sources
+            ],
+        )
+
+    return SyncJobStatusResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status.value,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        result=result,
+    )
+
 @router.get(
     "/{project_id}/analytics",
     response_model=ProjectAnalyticsResponse,

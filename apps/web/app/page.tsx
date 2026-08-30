@@ -1,10 +1,12 @@
 import AnalyticsDashboard, {
-  ProjectAnalytics,
-} from "../components/analytics-dashboard";
+  type ProjectAnalytics,
+} from "@/components/analytics-dashboard";
 
 import RankedInsights, {
-  RankedInsightsResponse,
-} from "../components/ranked-insights";
+  type RankedInsightsResponse,
+} from "@/components/ranked-insights";
+
+import SyncButton from "@/components/sync-button";
 
 const API_BASE_URL =
   process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
@@ -88,7 +90,7 @@ export default async function Home() {
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
       <div className="border-b border-zinc-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-4">
           <div>
             <p className="text-sm font-semibold text-zinc-900">
               AI Product Discovery Engine
@@ -99,38 +101,31 @@ export default async function Home() {
             </p>
           </div>
 
-          <button
-            type="button"
-            disabled
-            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white opacity-50"
-          >
-            Sync now
-          </button>
+          <SyncButton projectId={PROJECT_ID} />
         </div>
       </div>
 
-      <div className="mx-auto max-w-7xl px-6 py-10">
-        <section className="mb-10">
-          <p className="mb-2 text-sm font-medium text-zinc-500">
+      <div className="mx-auto max-w-6xl px-6 py-10">
+        <section>
+          <p className="text-sm font-medium text-zinc-500">
             Project
           </p>
 
-          <h1 className="text-3xl font-semibold tracking-tight">
+          <h1 className="mt-1 text-3xl font-semibold tracking-tight text-zinc-950">
             {overview.project_name}
           </h1>
 
-          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
-            Monitor customer feedback, identify recurring pain points,
-            and prioritize product opportunities using evidence from
-            connected sources.
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-zinc-600">
+            Understand what customers are saying, identify recurring
+            problems, and prioritize the issues worth investigating.
           </p>
         </section>
 
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <section className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total feedback"
             value={overview.total_feedback.toLocaleString()}
-            helper="Feedback collected across all sources"
+            helper="Raw feedback collected"
           />
 
           <MetricCard
@@ -148,45 +143,50 @@ export default async function Home() {
           <MetricCard
             label="Prioritized issues"
             value={overview.insight_count.toLocaleString()}
-            helper="Recurring evidence-backed problems"
+            helper="Recurring evidence-backed issues"
           />
         </section>
 
-        <section className="mt-10">
-          <div className="rounded-xl border border-zinc-200 bg-white p-6">
-            <h2 className="font-semibold text-zinc-900">
-              Project health
-            </h2>
+        <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h2 className="font-semibold text-zinc-900">
+                Project health
+              </h2>
 
-            <p className="mt-1 text-sm text-zinc-500">
-              Current feedback coverage
-            </p>
-
-            <div className="mt-6">
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="text-zinc-600">
-                  Relevant feedback
-                </span>
-
-                <span className="font-medium text-zinc-900">
-                  {relevanceRate}%
-                </span>
-              </div>
-
-              <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
-                <div
-                  className="h-full rounded-full bg-zinc-900"
-                  style={{
-                    width: `${Math.min(relevanceRate, 100)}%`,
-                  }}
-                />
-              </div>
-
-              <p className="mt-4 text-xs leading-5 text-zinc-500">
-                Relevant feedback is the portion of collected feedback
-                classified as useful for product analysis.
+              <p className="mt-1 text-sm text-zinc-500">
+                Relevant feedback available for product analysis
               </p>
             </div>
+
+            <div className="text-left sm:text-right">
+              <p className="text-2xl font-semibold text-zinc-900">
+                {relevanceRate}%
+              </p>
+
+              <p className="text-xs text-zinc-500">
+                relevance rate
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-5 h-2 overflow-hidden rounded-full bg-zinc-100">
+            <div
+              className="h-full rounded-full bg-zinc-900 transition-all"
+              style={{
+                width: `${Math.min(relevanceRate, 100)}%`,
+              }}
+            />
+          </div>
+
+          <div className="mt-3 flex justify-between text-xs text-zinc-500">
+            <span>
+              {overview.relevant_feedback.toLocaleString()} relevant
+            </span>
+
+            <span>
+              {overview.total_feedback.toLocaleString()} total
+            </span>
           </div>
         </section>
 
@@ -208,16 +208,16 @@ function MetricCard({
   helper: string;
 }) {
   return (
-    <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <p className="text-sm font-medium text-zinc-500">
+    <div className="rounded-xl border border-zinc-200 bg-white p-5 shadow-sm">
+      <p className="text-sm text-zinc-500">
         {label}
       </p>
 
-      <p className="mt-3 text-3xl font-semibold tracking-tight">
+      <p className="mt-2 text-2xl font-semibold text-zinc-900">
         {value}
       </p>
 
-      <p className="mt-2 text-xs leading-5 text-zinc-500">
+      <p className="mt-2 text-xs text-zinc-500">
         {helper}
       </p>
     </div>
