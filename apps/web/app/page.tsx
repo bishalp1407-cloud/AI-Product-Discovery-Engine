@@ -32,43 +32,145 @@ async function getProjectOverview(): Promise<ProjectOverview> {
 export default async function Home() {
   const overview = await getProjectOverview();
 
+  const relevanceRate =
+    overview.total_feedback > 0
+      ? Math.round(
+          (overview.relevant_feedback / overview.total_feedback) * 100,
+        )
+      : 0;
+
   return (
-    <main className="min-h-screen bg-zinc-50 px-6 py-10 text-zinc-950">
-      <div className="mx-auto max-w-7xl">
-        <header className="mb-10">
+    <main className="min-h-screen bg-zinc-50 text-zinc-950">
+      <div className="border-b border-zinc-200 bg-white">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
+          <div>
+            <p className="text-sm font-semibold text-zinc-900">
+              AI Product Discovery Engine
+            </p>
+            <p className="text-xs text-zinc-500">
+              Feedback intelligence workspace
+            </p>
+          </div>
+
+          <button
+            type="button"
+            disabled
+            className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white opacity-50"
+          >
+            Sync now
+          </button>
+        </div>
+      </div>
+
+      <div className="mx-auto max-w-7xl px-6 py-10">
+        <section className="mb-10">
           <p className="mb-2 text-sm font-medium text-zinc-500">
-            AI Product Discovery Engine
+            Project
           </p>
 
           <h1 className="text-3xl font-semibold tracking-tight">
             {overview.project_name}
           </h1>
 
-          <p className="mt-2 text-sm text-zinc-500">
-            Customer feedback intelligence dashboard
+          <p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-600">
+            Monitor customer feedback, identify recurring pain points,
+            and prioritize product opportunities using evidence from
+            connected sources.
           </p>
-        </header>
+        </section>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
-            label="Total Feedback"
-            value={overview.total_feedback}
+            label="Total feedback"
+            value={overview.total_feedback.toLocaleString()}
+            helper="Feedback collected across all sources"
           />
 
           <MetricCard
-            label="Relevant Feedback"
-            value={overview.relevant_feedback}
+            label="Relevant feedback"
+            value={overview.relevant_feedback.toLocaleString()}
+            helper={`${relevanceRate}% of collected feedback`}
           />
 
           <MetricCard
-            label="Connected Sources"
-            value={overview.source_count}
+            label="Connected sources"
+            value={overview.source_count.toLocaleString()}
+            helper="Active feedback channels"
           />
 
           <MetricCard
-            label="Prioritized Issues"
-            value={overview.insight_count}
+            label="Prioritized issues"
+            value={overview.insight_count.toLocaleString()}
+            helper="Recurring evidence-backed problems"
           />
+        </section>
+
+        <section className="mt-10 grid gap-6 lg:grid-cols-[1.7fr_1fr]">
+          <div className="rounded-xl border border-zinc-200 bg-white">
+            <div className="border-b border-zinc-100 px-6 py-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="font-semibold text-zinc-900">
+                    Prioritized issues
+                  </h2>
+                  <p className="mt-1 text-sm text-zinc-500">
+                    Highest-impact recurring customer problems
+                  </p>
+                </div>
+
+                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
+                  {overview.insight_count} issues
+                </span>
+              </div>
+            </div>
+
+            <div className="px-6 py-12 text-center">
+              <p className="text-sm font-medium text-zinc-700">
+                Ranked insights will appear here
+              </p>
+
+              <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
+                In M7.4, this section will show the most important
+                pain points ranked by reach, impact, and confidence.
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-zinc-200 bg-white p-6">
+            <h2 className="font-semibold text-zinc-900">
+              Project health
+            </h2>
+
+            <p className="mt-1 text-sm text-zinc-500">
+              Current feedback coverage
+            </p>
+
+            <div className="mt-6">
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="text-zinc-600">
+                  Relevant feedback
+                </span>
+
+                <span className="font-medium text-zinc-900">
+                  {relevanceRate}%
+                </span>
+              </div>
+
+              <div className="h-2 overflow-hidden rounded-full bg-zinc-100">
+                <div
+                  className="h-full rounded-full bg-zinc-900"
+                  style={{
+                    width: `${Math.min(relevanceRate, 100)}%`,
+                  }}
+                />
+              </div>
+
+              <p className="mt-4 text-xs leading-5 text-zinc-500">
+                Relevant feedback is the portion of collected feedback
+                classified as useful for product analysis.
+              </p>
+            </div>
+          </div>
         </section>
       </div>
     </main>
@@ -78,16 +180,24 @@ export default async function Home() {
 function MetricCard({
   label,
   value,
+  helper,
 }: {
   label: string;
-  value: number;
+  value: string;
+  helper: string;
 }) {
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-6 shadow-sm">
-      <p className="text-sm text-zinc-500">{label}</p>
+      <p className="text-sm font-medium text-zinc-500">
+        {label}
+      </p>
 
-      <p className="mt-2 text-3xl font-semibold tracking-tight">
-        {value.toLocaleString()}
+      <p className="mt-3 text-3xl font-semibold tracking-tight">
+        {value}
+      </p>
+
+      <p className="mt-2 text-xs leading-5 text-zinc-500">
+        {helper}
       </p>
     </div>
   );
