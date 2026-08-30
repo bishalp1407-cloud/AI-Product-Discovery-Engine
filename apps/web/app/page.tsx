@@ -2,6 +2,10 @@ import AnalyticsDashboard, {
   ProjectAnalytics,
 } from "../components/analytics-dashboard";
 
+import RankedInsights, {
+  RankedInsightsResponse,
+} from "../components/ranked-insights";
+
 const API_BASE_URL =
   process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
@@ -50,10 +54,28 @@ async function getProjectAnalytics(): Promise<ProjectAnalytics> {
   return response.json();
 }
 
+async function getRankedInsights(): Promise<RankedInsightsResponse> {
+  const response = await fetch(
+    `${API_BASE_URL}/projects/${PROJECT_ID}/insights?limit=5&offset=0`,
+    {
+      cache: "no-store",
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(
+      `Failed to load ranked insights: ${response.status}`,
+    );
+  }
+
+  return response.json();
+}
+
 export default async function Home() {
-  const [overview, analytics] = await Promise.all([
+  const [overview, analytics, insights] = await Promise.all([
     getProjectOverview(),
     getProjectAnalytics(),
+    getRankedInsights(),
   ]);
 
   const relevanceRate =
@@ -65,7 +87,6 @@ export default async function Home() {
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
-      {/* Top navigation */}
       <div className="border-b border-zinc-200 bg-white">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-6 py-4">
           <div>
@@ -89,7 +110,6 @@ export default async function Home() {
       </div>
 
       <div className="mx-auto max-w-7xl px-6 py-10">
-        {/* Project heading */}
         <section className="mb-10">
           <p className="mb-2 text-sm font-medium text-zinc-500">
             Project
@@ -106,7 +126,6 @@ export default async function Home() {
           </p>
         </section>
 
-        {/* Overview metrics */}
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <MetricCard
             label="Total feedback"
@@ -133,39 +152,7 @@ export default async function Home() {
           />
         </section>
 
-        {/* Prioritized issues + project health */}
-        <section className="mt-10 grid gap-6 lg:grid-cols-[1.7fr_1fr]">
-          <div className="rounded-xl border border-zinc-200 bg-white">
-            <div className="border-b border-zinc-100 px-6 py-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-semibold text-zinc-900">
-                    Prioritized issues
-                  </h2>
-
-                  <p className="mt-1 text-sm text-zinc-500">
-                    Highest-impact recurring customer problems
-                  </p>
-                </div>
-
-                <span className="rounded-full bg-zinc-100 px-3 py-1 text-xs font-medium text-zinc-600">
-                  {overview.insight_count} issues
-                </span>
-              </div>
-            </div>
-
-            <div className="px-6 py-12 text-center">
-              <p className="text-sm font-medium text-zinc-700">
-                Ranked insights will appear here
-              </p>
-
-              <p className="mx-auto mt-2 max-w-md text-sm text-zinc-500">
-                In M7.4, this section will show the most important
-                pain points ranked by reach, impact, and confidence.
-              </p>
-            </div>
-          </div>
-
+        <section className="mt-10">
           <div className="rounded-xl border border-zinc-200 bg-white p-6">
             <h2 className="font-semibold text-zinc-900">
               Project health
@@ -203,7 +190,8 @@ export default async function Home() {
           </div>
         </section>
 
-        {/* Analytics */}
+        <RankedInsights insights={insights} />
+
         <AnalyticsDashboard analytics={analytics} />
       </div>
     </main>
