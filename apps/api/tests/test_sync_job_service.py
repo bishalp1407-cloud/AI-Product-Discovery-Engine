@@ -26,9 +26,11 @@ def test_sync_job_persists_across_database_sessions():
         db.add(project)
         db.commit()
 
-        job = create_sync_job(
+        job, created = create_sync_job(
             project_id=project_id,
-        )
+        )   
+
+        assert created is True
 
         job_id = job.id
 

@@ -1,5 +1,5 @@
 from dataclasses import asdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from enum import Enum
 from uuid import UUID
 
@@ -10,27 +10,90 @@ from app.models.sync_job import SyncJob
 from app.services.project_sync_service import sync_project
 
 
+STALE_JOB_TIMEOUT = timedelta(minutes=30)
+
+
 class SyncJobStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
 
-
-def create_sync_job(
-    *,
-    project_id: UUID,
-) -> SyncJob:
+def mark_stale_sync_jobs() -> int:
     """
-    Create and persist a new sync job.
+    Mark long-running sync jobs as failed.
 
-    Job state lives in PostgreSQL rather than process memory,
-    so API instances can retrieve the same job after a restart
-    or deployment.
+    This handles cases where the API process was stopped or restarted
+    while a background sync was still running.
     """
     db = SessionLocal()
 
     try:
+        cutoff = datetime.now(timezone.utc) - STALE_JOB_TIMEOUT
+
+        stale_jobs = db.scalars(
+            select(SyncJob).where(
+                SyncJob.status == SyncJobStatus.RUNNING.value,
+                SyncJob.started_at.is_not(None),
+                SyncJob.started_at < cutoff,
+            )
+        ).all()
+
+        for job in stale_jobs:
+            job.status = SyncJobStatus.FAILED.value
+            job.completed_at = datetime.now(timezone.utc)
+            job.error = "Sync interrupted before completion."
+
+        db.commit()
+
+        return len(stale_jobs)
+
+    except Exception:
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
+
+
+
+
+def create_sync_job(
+    *,
+    project_id: UUID,
+) -> tuple[SyncJob, bool]:
+    """
+    Create and persist a sync job.
+
+    Returns:
+        (job, created)
+
+    If the project already has a queued or running job,
+    return that job instead of creating a duplicate.
+    """
+    mark_stale_sync_jobs()
+
+    db = SessionLocal()
+
+    try:
+        existing_job = db.scalar(
+            select(SyncJob)
+            .where(
+                SyncJob.project_id == project_id,
+                SyncJob.status.in_(
+                    [
+                        SyncJobStatus.QUEUED.value,
+                        SyncJobStatus.RUNNING.value,
+                    ]
+                ),
+            )
+            .order_by(SyncJob.created_at.desc())
+        )
+
+        if existing_job is not None:
+            db.expunge(existing_job)
+            return existing_job, False
+
         job = SyncJob(
             project_id=project_id,
             status=SyncJobStatus.QUEUED.value,
@@ -40,12 +103,9 @@ def create_sync_job(
         db.add(job)
         db.commit()
         db.refresh(job)
-
-        # Detach the object before closing the session so callers
-        # can safely read its attributes.
         db.expunge(job)
 
-        return job
+        return job, True
 
     except Exception:
         db.rollback()
@@ -75,6 +135,41 @@ def get_sync_job(
 
         db.expunge(job)
 
+        return job
+
+    finally:
+        db.close()
+
+def get_active_sync_job(
+    *,
+    project_id: UUID,
+) -> SyncJob | None:
+    """
+    Return the newest queued or running sync job for a project.
+    """
+    mark_stale_sync_jobs()
+
+    db = SessionLocal()
+
+    try:
+        job = db.scalar(
+            select(SyncJob)
+            .where(
+                SyncJob.project_id == project_id,
+                SyncJob.status.in_(
+                    [
+                        SyncJobStatus.QUEUED.value,
+                        SyncJobStatus.RUNNING.value,
+                    ]
+                ),
+            )
+            .order_by(SyncJob.created_at.desc())
+        )
+
+        if job is None:
+            return None
+
+        db.expunge(job)
         return job
 
     finally:

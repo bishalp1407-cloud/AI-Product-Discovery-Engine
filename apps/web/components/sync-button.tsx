@@ -41,33 +41,117 @@ export default function SyncButton({
 
   const storageKey = `active-sync-job:${projectId}`;
 
-const [activeJobId, setActiveJobId] = useState<string | null>(() => {
-  if (typeof window === "undefined") {
-    return null;
-  }
+  const [activeJobId, setActiveJobId] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
 
-  return window.localStorage.getItem(storageKey);
-});
+    return window.localStorage.getItem(storageKey);
+  });
 
-const [isSyncing, setIsSyncing] = useState(() => {
-  if (typeof window === "undefined") {
-    return false;
-  }
+  const [isSyncing, setIsSyncing] = useState(() => {
+    if (typeof window === "undefined") {
+      return false;
+    }
 
-  return window.localStorage.getItem(storageKey) !== null;
-});
+    return window.localStorage.getItem(storageKey) !== null;
+  });
 
-const [message, setMessage] = useState<string | null>(() => {
-  if (typeof window === "undefined") {
-    return null;
-  }
+  const [message, setMessage] = useState<string | null>(() => {
+    if (typeof window === "undefined") {
+      return null;
+    }
 
-  return window.localStorage.getItem(storageKey)
-    ? "Sync in progress..."
-    : null;
-});
+    return window.localStorage.getItem(storageKey)
+      ? "Sync in progress..."
+      : null;
+  });
 
-  // Poll the backend whenever there is an active sync job.
+  /*
+   * Discover an active job from the backend.
+   *
+   * This is important because localStorage only belongs to one
+   * browser/device. PostgreSQL is the source of truth for whether
+   * the project already has a running sync.
+   */
+  useEffect(() => {
+    let cancelled = false;
+
+    async function discoverActiveJob() {
+      try {
+        const response = await fetch(
+          `/api/projects/${projectId}/sync/active`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+        /*
+         * 404 simply means there is currently no active job.
+         * That is a normal state, not an error.
+         */
+        if (response.status === 404) {
+          return;
+        }
+
+        const data = (await response.json()) as
+          | SyncJobStatus
+          | { detail?: string };
+
+        if (!response.ok) {
+          throw new Error(
+            "detail" in data && data.detail
+              ? data.detail
+              : "Failed to check active sync.",
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const job = data as SyncJobStatus;
+
+        if (
+          job.status === "queued" ||
+          job.status === "running"
+        ) {
+          window.localStorage.setItem(
+            storageKey,
+            job.job_id,
+          );
+
+          setActiveJobId(job.job_id);
+          setIsSyncing(true);
+          setMessage("Sync in progress...");
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        /*
+         * Failure to discover an active job should not destroy
+         * an already-known local job.
+         */
+        console.error(
+          "Failed to discover active sync job:",
+          error,
+        );
+      }
+    }
+
+    void discoverActiveJob();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, storageKey]);
+
+  /*
+   * Poll the backend whenever we know about an active job.
+   */
   useEffect(() => {
     if (!activeJobId) {
       return;
@@ -114,9 +198,13 @@ const [message, setMessage] = useState<string | null>(() => {
 
         if (currentJob.status === "failed") {
           window.localStorage.removeItem(storageKey);
+
           setActiveJobId(null);
           setIsSyncing(false);
-          setMessage(currentJob.error ?? "Sync failed.");
+          setMessage(
+            currentJob.error ?? "Sync failed.",
+          );
+
           return;
         }
 
@@ -124,7 +212,9 @@ const [message, setMessage] = useState<string | null>(() => {
           const result = currentJob.result;
 
           if (!result) {
-            throw new Error("Sync completed without a result.");
+            throw new Error(
+              "Sync completed without a result.",
+            );
           }
 
           window.localStorage.removeItem(storageKey);
@@ -139,21 +229,24 @@ const [message, setMessage] = useState<string | null>(() => {
           router.refresh();
         }
       } catch (error) {
-  if (cancelled) {
-    return;
-  }
+        if (cancelled) {
+          return;
+        }
 
-  // A temporary polling/network failure does not mean the
-  // backend sync job has stopped. Keep the persisted job ID
-  // so polling can retry and navigation can restore the job.
-  setIsSyncing(true);
+        /*
+         * A temporary polling/network failure does not mean
+         * the backend job has stopped.
+         *
+         * Keep the job ID and retry on the next interval.
+         */
+        setIsSyncing(true);
 
-  setMessage(
-    error instanceof Error
-      ? `${error.message} Retrying...`
-      : "Unable to check sync status. Retrying...",
-  );
-}
+        setMessage(
+          error instanceof Error
+            ? `${error.message} Retrying...`
+            : "Unable to check sync status. Retrying...",
+        );
+      }
     }
 
     void checkStatus();
@@ -199,9 +292,13 @@ const [message, setMessage] = useState<string | null>(() => {
 
       const job = startData as SyncJobCreated;
 
-      window.localStorage.setItem(storageKey, job.job_id);
+      window.localStorage.setItem(
+        storageKey,
+        job.job_id,
+      );
 
       setActiveJobId(job.job_id);
+      setIsSyncing(true);
       setMessage("Sync in progress...");
     } catch (error) {
       setIsSyncing(false);

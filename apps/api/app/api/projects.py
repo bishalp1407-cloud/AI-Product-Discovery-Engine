@@ -30,6 +30,7 @@ from app.services.insight_detail_service import get_insight_detail
 from app.services.project_overview_service import get_project_overview
 from app.services.sync_job_service import (
     create_sync_job,
+    get_active_sync_job,
     get_sync_job,
     run_sync_job,
 )
@@ -169,6 +170,34 @@ def read_insight_detail(
         ],
     )
 
+@router.get(
+    "/{project_id}/sync/active",
+    response_model=SyncJobStatusResponse,
+)
+def read_active_sync_job(
+    project_id: UUID,
+) -> SyncJobStatusResponse:
+    job = get_active_sync_job(
+        project_id=project_id,
+    )
+
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active sync job",
+        )
+
+    return SyncJobStatusResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        result=None,
+    )
+
 @router.post(
     "/{project_id}/sync",
     response_model=SyncJobCreatedResponse,
@@ -190,11 +219,12 @@ def sync_project_feedback(
             detail="Project not found",
         )
 
-    job = create_sync_job(
+    job, created = create_sync_job(
         project_id=project_id,
     )
 
-    background_tasks.add_task(
+    if created:
+        background_tasks.add_task(
         run_sync_job,
         job_id=job.id,
     )
