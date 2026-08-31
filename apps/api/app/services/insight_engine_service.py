@@ -529,57 +529,46 @@ def _replace_project_insights(
     for prepared in prepared_insights:
         insight = Insight(
             project_id=project_id,
-            category=(
-                prepared.cluster.category
-            ),
+            category=prepared.cluster.category,
             title=prepared.summary.title,
-            description=(
-                prepared.summary.description
-            ),
-            feedback_count=(
-                prepared.scores.feedback_count
-            ),
-            reach_score=(
-                prepared.scores.reach_score
-            ),
-            impact_score=(
-                prepared.scores.impact_score
-            ),
-            confidence_score=(
-                prepared.scores.confidence_score
-            ),
-            opportunity_score=(
-                prepared.scores.opportunity_score
-            ),
+            description=prepared.summary.description,
+            feedback_count=prepared.scores.feedback_count,
+            reach_score=prepared.scores.reach_score,
+            impact_score=prepared.scores.impact_score,
+            confidence_score=prepared.scores.confidence_score,
+            opportunity_score=prepared.scores.opportunity_score,
         )
 
-        db.add(
-            insight
-        )
+        db.add(insight)
 
         # Generate the insight UUID before creating
         # evidence links.
         db.flush()
 
-        for member in (
-            prepared.cluster.members
-        ):
+        # A cluster should contain each feedback record only once.
+        # Keep this guard at the persistence boundary so duplicate
+        # members cannot violate the composite primary key on
+        # (insight_id, feedback_id).
+        seen_feedback_ids: set[UUID] = set()
+
+        for member in prepared.cluster.members:
+            feedback_id = UUID(member.feedback_id)
+
+            if feedback_id in seen_feedback_ids:
+                continue
+
+            seen_feedback_ids.add(feedback_id)
+
             evidence_link = InsightFeedback(
                 insight_id=insight.id,
-                feedback_id=UUID(
-                    member.feedback_id
-                ),
+                feedback_id=feedback_id,
             )
 
-            db.add(
-                evidence_link
-            )
+            db.add(evidence_link)
 
         persisted_count += 1
 
     return persisted_count
-
-
 # ------------------------------------------------------------------
 # Public Insight Engine
 # ------------------------------------------------------------------
