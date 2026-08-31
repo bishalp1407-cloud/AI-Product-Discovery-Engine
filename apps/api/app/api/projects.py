@@ -202,8 +202,9 @@ def sync_project_feedback(
     return SyncJobCreatedResponse(
         job_id=job.id,
         project_id=job.project_id,
-        status=job.status.value,
+        status=job.status,
     )
+
 
 @router.get(
     "/{project_id}/sync/{job_id}",
@@ -224,40 +225,41 @@ def read_sync_job_status(
     result = None
 
     if job.result is not None:
+        result_data = job.result
+
         result = ProjectSyncResponse(
-            project_id=job.result.project_id,
-            sources_synced=job.result.sources_synced,
-            feedback_fetched=job.result.feedback_fetched,
-            feedback_created=job.result.feedback_created,
-            duplicates=job.result.duplicates,
-            analyses_completed=job.result.analyses_completed,
-            analyses_failed=job.result.analyses_failed,
-            insights_created=job.result.insights_created,
+            project_id=UUID(result_data["project_id"]),
+            sources_synced=result_data["sources_synced"],
+            feedback_fetched=result_data["feedback_fetched"],
+            feedback_created=result_data["feedback_created"],
+            duplicates=result_data["duplicates"],
+            analyses_completed=result_data["analyses_completed"],
+            analyses_failed=result_data["analyses_failed"],
+            insights_created=result_data["insights_created"],
             sources=[
                 SourceSyncResponse(
-                    source_id=source.source_id,
-                    source_name=source.source_name,
-                    source_type=source.source_type,
-                    fetched=source.fetched,
-                    created=source.created,
-                    duplicates=source.duplicates,
-                    error=source.error,
+                    source_id=UUID(source["source_id"]),
+                    source_name=source["source_name"],
+                    source_type=source["source_type"],
+                    fetched=source["fetched"],
+                    created=source["created"],
+                    duplicates=source["duplicates"],
+                    error=source["error"],
                 )
-                for source in job.result.sources
+                for source in result_data.get("sources", [])
             ],
         )
 
     return SyncJobStatusResponse(
         job_id=job.id,
         project_id=job.project_id,
-        status=job.status.value,
+        status=job.status,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,
         error=job.error,
         result=result,
     )
-
 @router.get(
     "/{project_id}/analytics",
     response_model=ProjectAnalyticsResponse,
