@@ -11,7 +11,8 @@ import SyncButton from "@/components/sync-button";
 const API_BASE_URL =
   process.env.API_BASE_URL ?? "http://127.0.0.1:8000";
 
-const PROJECT_ID = "4a3ed65e-ab06-4b3e-9eb4-8190a7cc7495";
+const PROJECT_ID =
+  process.env.PROJECT_ID ?? "4a3ed65e-ab06-4b3e-9eb4-8190a7cc7495";
 
 type ProjectOverview = {
   project_id: string;
