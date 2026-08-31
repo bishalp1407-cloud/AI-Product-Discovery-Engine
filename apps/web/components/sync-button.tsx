@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 type SyncResult = {
   project_id: string;
@@ -34,19 +34,140 @@ type SyncButtonProps = {
 
 const POLL_INTERVAL_MS = 2000;
 
-function sleep(milliseconds: number) {
-  return new Promise((resolve) =>
-    setTimeout(resolve, milliseconds),
-  );
-}
-
 export default function SyncButton({
   projectId,
 }: SyncButtonProps) {
   const router = useRouter();
 
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
+  const storageKey = `active-sync-job:${projectId}`;
+
+const [activeJobId, setActiveJobId] = useState<string | null>(() => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(storageKey);
+});
+
+const [isSyncing, setIsSyncing] = useState(() => {
+  if (typeof window === "undefined") {
+    return false;
+  }
+
+  return window.localStorage.getItem(storageKey) !== null;
+});
+
+const [message, setMessage] = useState<string | null>(() => {
+  if (typeof window === "undefined") {
+    return null;
+  }
+
+  return window.localStorage.getItem(storageKey)
+    ? "Sync in progress..."
+    : null;
+});
+
+  // Poll the backend whenever there is an active sync job.
+  useEffect(() => {
+    if (!activeJobId) {
+      return;
+    }
+
+    let cancelled = false;
+
+    async function checkStatus() {
+      try {
+        const statusResponse = await fetch(
+          `/api/projects/${projectId}/sync/${activeJobId}`,
+          {
+            method: "GET",
+            cache: "no-store",
+          },
+        );
+
+        const statusData = (await statusResponse.json()) as
+          | SyncJobStatus
+          | { detail?: string };
+
+        if (!statusResponse.ok) {
+          throw new Error(
+            "detail" in statusData && statusData.detail
+              ? statusData.detail
+              : "Failed to check sync status.",
+          );
+        }
+
+        if (cancelled) {
+          return;
+        }
+
+        const currentJob = statusData as SyncJobStatus;
+
+        if (
+          currentJob.status === "queued" ||
+          currentJob.status === "running"
+        ) {
+          setIsSyncing(true);
+          setMessage("Sync in progress...");
+          return;
+        }
+
+        if (currentJob.status === "failed") {
+          window.localStorage.removeItem(storageKey);
+          setActiveJobId(null);
+          setIsSyncing(false);
+          setMessage(currentJob.error ?? "Sync failed.");
+          return;
+        }
+
+        if (currentJob.status === "completed") {
+          const result = currentJob.result;
+
+          if (!result) {
+            throw new Error("Sync completed without a result.");
+          }
+
+          window.localStorage.removeItem(storageKey);
+
+          setActiveJobId(null);
+          setIsSyncing(false);
+
+          setMessage(
+            `Sync complete · ${result.feedback_created} new feedback · ${result.analyses_completed} analyzed · ${result.insights_created} prioritized issues`,
+          );
+
+          router.refresh();
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+
+        window.localStorage.removeItem(storageKey);
+
+        setActiveJobId(null);
+        setIsSyncing(false);
+
+        setMessage(
+          error instanceof Error
+            ? error.message
+            : "Something went wrong while syncing.",
+        );
+      }
+    }
+
+    void checkStatus();
+
+    const intervalId = window.setInterval(
+      () => void checkStatus(),
+      POLL_INTERVAL_MS,
+    );
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [activeJobId, projectId, router, storageKey]);
 
   async function handleSync() {
     if (isSyncing) {
@@ -78,72 +199,18 @@ export default function SyncButton({
 
       const job = startData as SyncJobCreated;
 
+      window.localStorage.setItem(storageKey, job.job_id);
+
+      setActiveJobId(job.job_id);
       setMessage("Sync in progress...");
-
-      while (true) {
-        await sleep(POLL_INTERVAL_MS);
-
-        const statusResponse = await fetch(
-          `/api/projects/${projectId}/sync/${job.job_id}`,
-          {
-            method: "GET",
-            cache: "no-store",
-          },
-        );
-
-        const statusData = (await statusResponse.json()) as
-          | SyncJobStatus
-          | { detail?: string };
-
-        if (!statusResponse.ok) {
-          throw new Error(
-            "detail" in statusData && statusData.detail
-              ? statusData.detail
-              : "Failed to check sync status.",
-          );
-        }
-
-        const currentJob = statusData as SyncJobStatus;
-
-        if (
-          currentJob.status === "queued" ||
-          currentJob.status === "running"
-        ) {
-          setMessage("Sync in progress...");
-          continue;
-        }
-
-        if (currentJob.status === "failed") {
-          throw new Error(
-            currentJob.error ?? "Sync failed.",
-          );
-        }
-
-        if (currentJob.status === "completed") {
-          const result = currentJob.result;
-
-          if (!result) {
-            throw new Error(
-              "Sync completed without a result.",
-            );
-          }
-
-          setMessage(
-            `Sync complete · ${result.feedback_created} new feedback · ${result.analyses_completed} analyzed · ${result.insights_created} prioritized issues`,
-        );
-
-          router.refresh();
-          break;
-        }
-      }
     } catch (error) {
+      setIsSyncing(false);
+
       setMessage(
         error instanceof Error
           ? error.message
           : "Something went wrong while syncing.",
       );
-    } finally {
-      setIsSyncing(false);
     }
   }
 
