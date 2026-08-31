@@ -139,21 +139,21 @@ const [message, setMessage] = useState<string | null>(() => {
           router.refresh();
         }
       } catch (error) {
-        if (cancelled) {
-          return;
-        }
+  if (cancelled) {
+    return;
+  }
 
-        window.localStorage.removeItem(storageKey);
+  // A temporary polling/network failure does not mean the
+  // backend sync job has stopped. Keep the persisted job ID
+  // so polling can retry and navigation can restore the job.
+  setIsSyncing(true);
 
-        setActiveJobId(null);
-        setIsSyncing(false);
-
-        setMessage(
-          error instanceof Error
-            ? error.message
-            : "Something went wrong while syncing.",
-        );
-      }
+  setMessage(
+    error instanceof Error
+      ? `${error.message} Retrying...`
+      : "Unable to check sync status. Retrying...",
+  );
+}
     }
 
     void checkStatus();
