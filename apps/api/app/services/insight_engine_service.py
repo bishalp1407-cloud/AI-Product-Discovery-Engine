@@ -637,6 +637,20 @@ def rebuild_project_insights(
         )
 
         # ------------------------------------------------------
+        # End the read transaction before long-running
+        # clustering and AI enrichment.
+        #
+        # The data above has already been materialized into
+        # plain Python values/dataclasses, so it does not need
+        # an active database transaction anymore.
+        #
+        # Persistence below will automatically begin a fresh
+        # transaction for the atomic DELETE + INSERT operation.
+        # ------------------------------------------------------
+
+        db.rollback()
+
+        # ------------------------------------------------------
         # 2. Semantic clustering
         # ------------------------------------------------------
 
