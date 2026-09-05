@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import Callable
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
@@ -34,6 +35,10 @@ from app.services.insight_summary_service import (
     generate_fallback_insight_summary,
     generate_insight_summaries_batch,
 )
+from app.services.sync_cancellation import SyncCancelledError
+
+
+CancellationCallback = Callable[[], bool]
 
 
 # ------------------------------------------------------------------
@@ -52,7 +57,6 @@ AI_SUMMARY_BATCH_SIZE = 5
 # ------------------------------------------------------------------
 # Data structures
 # ------------------------------------------------------------------
-
 
 @dataclass
 class PreparedInsight:
@@ -85,7 +89,6 @@ class InsightEngineResult:
 # Source normalization
 # ------------------------------------------------------------------
 
-
 def _normalize_source_type(
     source_type: object,
 ) -> str:
@@ -111,7 +114,6 @@ def _normalize_source_type(
 # ------------------------------------------------------------------
 # Project-scoped metrics
 # ------------------------------------------------------------------
-
 
 def _get_total_relevant_feedback(
     db: Session,
@@ -212,7 +214,6 @@ def _get_available_source_types(
 # Cohesion
 # ------------------------------------------------------------------
 
-
 def _calculate_cluster_cohesion(
     cluster: CandidateCluster,
 ) -> float:
@@ -255,7 +256,6 @@ def _calculate_cluster_cohesion(
 # ------------------------------------------------------------------
 # Scoring
 # ------------------------------------------------------------------
-
 
 def _score_cluster(
     cluster: CandidateCluster,
@@ -312,12 +312,12 @@ def _score_cluster(
 # Insight preparation
 # ------------------------------------------------------------------
 
-
 def _prepare_insights(
     clusters: list[CandidateCluster],
     *,
     total_relevant_feedback: int,
     available_source_types: set[str],
+    cancellation_callback: CancellationCallback | None = None,
 ) -> list[PreparedInsight]:
     """
     Prepare recurring product insights for persistence.
@@ -337,14 +337,19 @@ def _prepare_insights(
 
     AI affects presentation only, never ranking.
 
-    With the current MVP configuration:
-
-        AI_ENRICHMENT_LIMIT = 15
-        AI_SUMMARY_BATCH_SIZE = 5
-
-    therefore at most three batch-generation requests
-    are needed.
+    Cancellation is checked between expensive scoring,
+    AI batches, and fallback-summary generation so a
+    long-running sync can stop cooperatively.
     """
+
+    def check_cancellation() -> None:
+        if (
+            cancellation_callback is not None
+            and cancellation_callback()
+        ):
+            raise SyncCancelledError(
+                "Sync cancelled by user."
+            )
 
     scored_clusters: list[
         tuple[
@@ -358,6 +363,8 @@ def _prepare_insights(
     # ----------------------------------------------------------
 
     for cluster in clusters:
+        check_cancellation()
+
         if (
             len(cluster.members)
             < MINIMUM_EVIDENCE_COUNT
@@ -384,6 +391,8 @@ def _prepare_insights(
     # ----------------------------------------------------------
     # 2. Rank BEFORE consuming external AI capacity.
     # ----------------------------------------------------------
+
+    check_cancellation()
 
     scored_clusters.sort(
         key=lambda item: (
@@ -416,6 +425,8 @@ def _prepare_insights(
         enrichment_count,
         AI_SUMMARY_BATCH_SIZE,
     ):
+        check_cancellation()
+
         end = min(
             start + AI_SUMMARY_BATCH_SIZE,
             enrichment_count,
@@ -436,6 +447,8 @@ def _prepare_insights(
             )
         )
 
+        check_cancellation()
+
         # The batch-summary service guarantees one returned
         # summary for every supplied cluster, using fallback
         # summaries where necessary.
@@ -446,6 +459,8 @@ def _prepare_insights(
             batch_items,
             batch_summaries,
         ):
+            check_cancellation()
+
             prepared.append(
                 PreparedInsight(
                     cluster=cluster,
@@ -462,6 +477,8 @@ def _prepare_insights(
     for cluster, scores in scored_clusters[
         enrichment_count:
     ]:
+        check_cancellation()
+
         summary = (
             generate_fallback_insight_summary(
                 cluster
@@ -476,13 +493,14 @@ def _prepare_insights(
             )
         )
 
+    check_cancellation()
+
     return prepared
 
 
 # ------------------------------------------------------------------
 # Persistence
 # ------------------------------------------------------------------
-
 
 def _replace_project_insights(
     db: Session,
@@ -569,15 +587,17 @@ def _replace_project_insights(
         persisted_count += 1
 
     return persisted_count
+
+
 # ------------------------------------------------------------------
 # Public Insight Engine
 # ------------------------------------------------------------------
-
 
 def rebuild_project_insights(
     db: Session,
     *,
     project_id: UUID,
+    cancellation_callback: CancellationCallback | None = None,
 ) -> InsightEngineResult:
     """
     Rebuild all recurring product insights for one project.
@@ -604,13 +624,20 @@ def rebuild_project_insights(
             ↓
         project-scoped persistence
 
-    The caller owns the Session object, but this service
-    owns commit/rollback for the rebuild operation.
-
-    AI/provider availability must never control clustering,
-    scoring, ranking, evidence linking, or whether the
-    Insight Engine can ultimately produce an insight set.
+    Cancellation is cooperative. Long-running generation
+    checks the supplied callback before persistence so a
+    cancelled sync never replaces the project's existing
+    insight set.
     """
+
+    def check_cancellation() -> None:
+        if (
+            cancellation_callback is not None
+            and cancellation_callback()
+        ):
+            raise SyncCancelledError(
+                "Sync cancelled by user."
+            )
 
     try:
         # ------------------------------------------------------
@@ -636,16 +663,11 @@ def rebuild_project_insights(
             )
         )
 
+        check_cancellation()
+
         # ------------------------------------------------------
         # End the read transaction before long-running
         # clustering and AI enrichment.
-        #
-        # The data above has already been materialized into
-        # plain Python values/dataclasses, so it does not need
-        # an active database transaction anymore.
-        #
-        # Persistence below will automatically begin a fresh
-        # transaction for the atomic DELETE + INSERT operation.
         # ------------------------------------------------------
 
         db.rollback()
@@ -654,11 +676,15 @@ def rebuild_project_insights(
         # 2. Semantic clustering
         # ------------------------------------------------------
 
+        check_cancellation()
+
         clusters = (
             cluster_candidate_issues(
                 candidates
             )
         )
+
+        check_cancellation()
 
         recurring_clusters = [
             cluster
@@ -680,11 +706,25 @@ def rebuild_project_insights(
                 available_source_types=(
                     available_source_types
                 ),
+                cancellation_callback=(
+                    cancellation_callback
+                ),
             )
         )
 
         # ------------------------------------------------------
-        # 4. Replace derived insights for this project only
+        # 4. Final cancellation check BEFORE persistence.
+        #
+        # This is critical:
+        #
+        # If cancellation was requested during AI
+        # generation, existing insights remain untouched.
+        # ------------------------------------------------------
+
+        check_cancellation()
+
+        # ------------------------------------------------------
+        # 5. Replace derived insights for this project only
         # ------------------------------------------------------
 
         persisted_count = (
@@ -698,7 +738,7 @@ def rebuild_project_insights(
         )
 
         # ------------------------------------------------------
-        # 5. Commit atomically
+        # 6. Commit atomically
         # ------------------------------------------------------
 
         db.commit()

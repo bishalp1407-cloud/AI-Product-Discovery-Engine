@@ -44,6 +44,11 @@ class SyncJob(Base):
         nullable=True,
     )
 
+    cancel_requested: Mapped[bool] = mapped_column(
+        nullable=False,
+        default=False,
+    )
+
     total_items: Mapped[int] = mapped_column(
         Integer,
         nullable=False,

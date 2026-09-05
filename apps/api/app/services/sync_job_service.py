@@ -1,14 +1,16 @@
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Callable
 from uuid import UUID
 
 from sqlalchemy import select
 
 from app.db.session import SessionLocal
 from app.models.sync_job import SyncJob
-from app.services.project_sync_service import sync_project
+from app.services.project_sync_service import (
+    SyncCancelledError,
+    sync_project,
+)
 
 
 STALE_JOB_TIMEOUT = timedelta(minutes=30)
@@ -19,6 +21,7 @@ class SyncJobStatus(str, Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 def mark_stale_sync_jobs() -> int:
@@ -153,6 +156,68 @@ def get_sync_job(
         db.close()
 
 
+def request_sync_job_cancel(
+    job_id: UUID,
+) -> SyncJob | None:
+    """
+    Request cancellation for a queued or running sync job.
+    """
+    db = SessionLocal()
+
+    try:
+        job = db.scalar(
+            select(SyncJob).where(
+                SyncJob.id == job_id,
+            )
+        )
+
+        if job is None:
+            return None
+
+        if job.status in (
+            SyncJobStatus.QUEUED.value,
+            SyncJobStatus.RUNNING.value,
+        ):
+            job.cancel_requested = True
+            db.commit()
+            db.refresh(job)
+
+        db.expunge(job)
+
+        return job
+
+    except Exception:
+        db.rollback()
+        raise
+
+    finally:
+        db.close()
+
+
+def is_sync_job_cancel_requested(
+    job_id: UUID,
+) -> bool:
+    """
+    Check whether cancellation has been requested
+    for a sync job.
+    """
+    db = SessionLocal()
+
+    try:
+        job = db.get(
+            SyncJob,
+            job_id,
+        )
+
+        if job is None:
+            return True
+
+        return job.cancel_requested
+
+    finally:
+        db.close()
+
+
 def get_active_sync_job(
     *,
     project_id: UUID,
@@ -270,6 +335,24 @@ def run_sync_job(
         if job is None:
             return
 
+        # -----------------------------------------------------
+        # Handle cancellation requested while job was queued
+        # -----------------------------------------------------
+
+        if job.cancel_requested:
+            job.status = (
+                SyncJobStatus.CANCELLED.value
+            )
+            job.current_stage = "cancelled"
+            job.completed_at = datetime.now(
+                timezone.utc
+            )
+            job.error = None
+
+            db.commit()
+
+            return
+
         job.status = (
             SyncJobStatus.RUNNING.value
         )
@@ -282,6 +365,7 @@ def run_sync_job(
         job.processed_items = 0
         job.total_batches = 0
         job.completed_batches = 0
+        job.cancel_requested = False
 
         project_id = job.project_id
 
@@ -326,6 +410,9 @@ def run_sync_job(
             sync_db,
             project_id=project_id,
             progress_callback=report_progress,
+            cancellation_callback=lambda: (
+                is_sync_job_cancel_requested(job_id)
+            ),
         )
 
         if result is None:
@@ -362,6 +449,26 @@ def run_sync_job(
             if job is None:
                 return
 
+            # -------------------------------------------------
+            # Cancellation may have been requested while the
+            # sync was performing a long-running operation.
+            # Check once more before marking it completed.
+            # -------------------------------------------------
+
+            if job.cancel_requested:
+                job.status = (
+                    SyncJobStatus.CANCELLED.value
+                )
+                job.current_stage = "cancelled"
+                job.completed_at = datetime.now(
+                    timezone.utc
+                )
+                job.error = None
+
+                status_db.commit()
+
+                return
+
             job.result = result_data
             job.status = (
                 SyncJobStatus.COMPLETED.value
@@ -381,12 +488,46 @@ def run_sync_job(
         finally:
             status_db.close()
 
-    except Exception as exc:
+    # ---------------------------------------------------------
+    # Handle user-requested cancellation separately
+    # ---------------------------------------------------------
+
+    except SyncCancelledError:
         sync_db.rollback()
 
-        # -----------------------------------------------------
-        # Persist failure
-        # -----------------------------------------------------
+        status_db = SessionLocal()
+
+        try:
+            job = status_db.get(
+                SyncJob,
+                job_id,
+            )
+
+            if job is not None:
+                job.status = (
+                    SyncJobStatus.CANCELLED.value
+                )
+                job.current_stage = "cancelled"
+                job.error = None
+                job.completed_at = datetime.now(
+                    timezone.utc
+                )
+
+                status_db.commit()
+
+        except Exception:
+            status_db.rollback()
+            raise
+
+        finally:
+            status_db.close()
+
+    # ---------------------------------------------------------
+    # Persist real failure
+    # ---------------------------------------------------------
+
+    except Exception as exc:
+        sync_db.rollback()
 
         status_db = SessionLocal()
 

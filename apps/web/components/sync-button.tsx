@@ -1,3 +1,4 @@
+
 "use client";
 
 import { useRouter } from "next/navigation";
@@ -23,7 +24,12 @@ type SyncJobCreated = {
 type SyncJobStatus = {
   job_id: string;
   project_id: string;
-  status: "queued" | "running" | "completed" | "failed";
+  status:
+    | "queued"
+    | "running"
+    | "completed"
+    | "failed"
+    | "cancelled";
   current_stage: string | null;
   total_items: number;
   processed_items: number;
@@ -31,6 +37,10 @@ type SyncJobStatus = {
   completed_batches: number;
   error: string | null;
   result: SyncResult | null;
+};
+
+type SyncErrorResponse = {
+  detail?: string;
 };
 
 type SyncButtonProps = {
@@ -42,6 +52,10 @@ const POLL_INTERVAL_MS = 2000;
 function getProgressMessage(job: SyncJobStatus): string {
   if (job.status === "queued") {
     return "Waiting to start...";
+  }
+
+  if (job.status === "cancelled") {
+    return "Sync cancelled.";
   }
 
   if (job.status !== "running") {
@@ -75,6 +89,22 @@ function getProgressMessage(job: SyncJobStatus): string {
   }
 }
 
+function getErrorMessage(
+  data: SyncJobStatus | SyncJobCreated | SyncErrorResponse,
+  fallback: string,
+): string {
+  if (
+    typeof data === "object" &&
+    data !== null &&
+    "detail" in data &&
+    typeof data.detail === "string"
+  ) {
+    return data.detail;
+  }
+
+  return fallback;
+}
+
 export default function SyncButton({
   projectId,
 }: SyncButtonProps) {
@@ -93,9 +123,13 @@ export default function SyncButton({
    * The discoverActiveJob effect below handles localStorage and
    * backend job discovery after hydration.
    */
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [activeJobId, setActiveJobId] = useState<string | null>(
+    null,
+  );
 
   const [isSyncing, setIsSyncing] = useState(false);
+
+  const [isCancelling, setIsCancelling] = useState(false);
 
   const [message, setMessage] = useState<string | null>(null);
 
@@ -131,6 +165,7 @@ export default function SyncButton({
           window.localStorage.removeItem(storageKey);
           setActiveJobId(null);
           setIsSyncing(false);
+          setIsCancelling(false);
           setMessage(null);
 
           return;
@@ -138,13 +173,14 @@ export default function SyncButton({
 
         const data = (await response.json()) as
           | SyncJobStatus
-          | { detail?: string };
+          | SyncErrorResponse;
 
         if (!response.ok) {
           throw new Error(
-            "detail" in data && data.detail
-              ? data.detail
-              : "Failed to check active sync.",
+            getErrorMessage(
+              data,
+              "Failed to check active sync.",
+            ),
           );
         }
 
@@ -165,18 +201,20 @@ export default function SyncButton({
 
           setActiveJobId(job.job_id);
           setIsSyncing(true);
+          setIsCancelling(false);
           setMessage(getProgressMessage(job));
 
           return;
         }
 
         /*
-         * If the backend reports a completed/failed job as the
-         * active job, clean up the local state.
+         * If the backend reports a completed/failed/cancelled job
+         * as the active job, clean up the local state.
          */
         window.localStorage.removeItem(storageKey);
         setActiveJobId(null);
         setIsSyncing(false);
+        setIsCancelling(false);
       } catch (error) {
         if (cancelled) {
           return;
@@ -233,13 +271,14 @@ export default function SyncButton({
 
         const statusData = (await statusResponse.json()) as
           | SyncJobStatus
-          | { detail?: string };
+          | SyncErrorResponse;
 
         if (!statusResponse.ok) {
           throw new Error(
-            "detail" in statusData && statusData.detail
-              ? statusData.detail
-              : "Failed to check sync status.",
+            getErrorMessage(
+              statusData,
+              "Failed to check sync status.",
+            ),
           );
         }
 
@@ -259,11 +298,27 @@ export default function SyncButton({
           return;
         }
 
+        if (currentJob.status === "cancelled") {
+          window.localStorage.removeItem(storageKey);
+
+          setActiveJobId(null);
+          setIsSyncing(false);
+          setIsCancelling(false);
+
+          setMessage(
+            "Sync cancelled · existing insights are unchanged.",
+          );
+
+          return;
+        }
+
         if (currentJob.status === "failed") {
           window.localStorage.removeItem(storageKey);
 
           setActiveJobId(null);
           setIsSyncing(false);
+          setIsCancelling(false);
+
           setMessage(
             currentJob.error ?? "Sync failed.",
           );
@@ -284,6 +339,7 @@ export default function SyncButton({
 
           setActiveJobId(null);
           setIsSyncing(false);
+          setIsCancelling(false);
 
           setMessage(
             `Sync complete · ${result.feedback_created} new feedback · ${result.analyses_completed} analyzed · ${result.insights_created} prioritized issues`,
@@ -343,13 +399,14 @@ export default function SyncButton({
 
       const startData = (await startResponse.json()) as
         | SyncJobCreated
-        | { detail?: string };
+        | SyncErrorResponse;
 
       if (!startResponse.ok) {
         throw new Error(
-          "detail" in startData && startData.detail
-            ? startData.detail
-            : "Failed to start sync.",
+          getErrorMessage(
+            startData,
+            "Failed to start sync.",
+          ),
         );
       }
 
@@ -362,6 +419,7 @@ export default function SyncButton({
 
       setActiveJobId(job.job_id);
       setIsSyncing(true);
+      setIsCancelling(false);
       setMessage("Waiting to start...");
     } catch (error) {
       setIsSyncing(false);
@@ -374,16 +432,94 @@ export default function SyncButton({
     }
   }
 
+  async function cancelSync() {
+    if (!activeJobId || isCancelling) {
+      return;
+    }
+
+    setIsCancelling(true);
+    setMessage("Cancelling sync...");
+
+    try {
+      const response = await fetch(
+        `/api/projects/${projectId}/sync/${activeJobId}/cancel`,
+        {
+          method: "POST",
+        },
+      );
+
+      const data = (await response.json()) as
+        | SyncJobStatus
+        | SyncErrorResponse;
+
+      if (!response.ok) {
+        throw new Error(
+          getErrorMessage(
+            data,
+            "Failed to cancel sync.",
+          ),
+        );
+      }
+
+      const job = data as SyncJobStatus;
+
+      if (job.status === "cancelled") {
+        window.localStorage.removeItem(storageKey);
+
+        setActiveJobId(null);
+        setIsSyncing(false);
+        setIsCancelling(false);
+
+        setMessage(
+          "Sync cancelled · existing insights are unchanged.",
+        );
+
+        return;
+      }
+
+      /*
+       * Cancellation has been requested but the background job
+       * has not reached its next cancellation checkpoint yet.
+       */
+      setMessage(
+        "Cancellation requested · stopping safely...",
+      );
+    } catch (error) {
+      setIsCancelling(false);
+
+      setMessage(
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while cancelling sync.",
+      );
+    }
+  }
+
   return (
     <div className="flex flex-col items-end gap-2">
-      <button
-        type="button"
-        onClick={handleSync}
-        disabled={isSyncing}
-        className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {isSyncing ? "Syncing..." : "Sync now"}
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={handleSync}
+          disabled={isSyncing}
+          className="rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {isSyncing ? "Syncing..." : "Sync now"}
+        </button>
+
+        {isSyncing && activeJobId && (
+          <button
+            type="button"
+            onClick={cancelSync}
+            disabled={isCancelling}
+            className="rounded-lg border border-zinc-300 px-4 py-2 text-sm font-medium text-zinc-700 transition hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isCancelling
+              ? "Cancelling..."
+              : "Cancel sync"}
+          </button>
+        )}
+      </div>
 
       {message && (
         <p className="max-w-sm text-right text-xs text-zinc-500">

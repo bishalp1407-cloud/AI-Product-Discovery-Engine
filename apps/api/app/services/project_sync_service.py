@@ -29,9 +29,13 @@ from app.services.google_play_ingestion import (
 )
 from app.services.insight_engine_service import rebuild_project_insights
 from app.services.youtube_ingestion import ingest_youtube_feedback
+from app.services.sync_cancellation import SyncCancelledError
 
 
 ProgressCallback = Callable[..., None]
+CancellationCallback = Callable[[], bool]
+
+
 
 
 @dataclass
@@ -70,6 +74,17 @@ def _report_progress(
     if progress_callback is not None:
         progress_callback(**kwargs)
 
+def _check_cancellation(
+    cancellation_callback: CancellationCallback | None,
+) -> None:
+    """
+    Stop the sync when cancellation has been requested.
+    """
+    if (
+        cancellation_callback is not None
+        and cancellation_callback()
+    ):
+        raise SyncCancelledError("Sync cancelled by user.")
 
 def _sync_source(
     db: Session,
@@ -212,14 +227,8 @@ def sync_project(
     *,
     project_id: UUID,
     progress_callback: ProgressCallback | None = None,
+    cancellation_callback: CancellationCallback | None = None,
 ) -> ProjectSyncResult | None:
-    project = db.get(
-        Project,
-        project_id,
-    )
-
-    if project is None:
-        return None
 
     sources = list(
         db.execute(
@@ -257,6 +266,7 @@ def sync_project(
     )
 
     for index, source in enumerate(sources):
+        _check_cancellation(cancellation_callback)
         try:
             result = _sync_source(
                 db,
@@ -309,6 +319,7 @@ def sync_project(
     for index, feedback in enumerate(
         feedback_to_analyze
     ):
+        _check_cancellation(cancellation_callback)
         try:
             analyze_and_store_feedback(
                 db,
@@ -338,6 +349,7 @@ def sync_project(
         total_batches=1,
         completed_batches=0,
     )
+    _check_cancellation(cancellation_callback)
 
     insight_result = rebuild_project_insights(
         db,

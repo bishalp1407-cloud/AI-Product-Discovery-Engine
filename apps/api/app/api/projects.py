@@ -29,9 +29,11 @@ from app.services.insight_api_service import get_ranked_insights
 from app.services.insight_detail_service import get_insight_detail
 from app.services.project_overview_service import get_project_overview
 from app.services.sync_job_service import (
+    SyncJobStatus,
     create_sync_job,
     get_active_sync_job,
     get_sync_job,
+    request_sync_job_cancel,
     run_sync_job,
 )
 from app.schemas.project_analytics import (
@@ -240,7 +242,94 @@ def sync_project_feedback(
         status=job.status,
     )
 
+@router.post(
+    "/{project_id}/sync/{job_id}/cancel",
+    response_model=SyncJobStatusResponse,
+)
+def cancel_sync_job(
+    project_id: UUID,
+    job_id: UUID,
+) -> SyncJobStatusResponse:
+    """
+    Request cancellation of an active sync job.
+    """
+    job = request_sync_job_cancel(job_id)
 
+    if job is None or job.project_id != project_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Sync job not found.",
+        )
+
+    if job.status not in (
+        SyncJobStatus.QUEUED.value,
+        SyncJobStatus.RUNNING.value,
+        SyncJobStatus.CANCELLED.value,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Sync job is no longer active.",
+        )
+
+    return SyncJobStatusResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status,
+        current_stage=job.current_stage,
+        total_items=job.total_items,
+        processed_items=job.processed_items,
+        total_batches=job.total_batches,
+        completed_batches=job.completed_batches,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        result=None,
+    )
+@router.post(
+    "/{project_id}/sync/{job_id}/cancel",
+    response_model=SyncJobStatusResponse,
+)
+def cancel_sync_job(
+    project_id: UUID,
+    job_id: UUID,
+) -> SyncJobStatusResponse:
+    """
+    Request cancellation of an active sync job.
+    """
+    job = request_sync_job_cancel(job_id)
+
+    if job is None or job.project_id != project_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Sync job not found.",
+        )
+
+    if job.status not in (
+        SyncJobStatus.QUEUED.value,
+        SyncJobStatus.RUNNING.value,
+        SyncJobStatus.CANCELLED.value,
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Sync job is no longer active.",
+        )
+
+    return SyncJobStatusResponse(
+        job_id=job.id,
+        project_id=job.project_id,
+        status=job.status,
+        current_stage=job.current_stage,
+        total_items=job.total_items,
+        processed_items=job.processed_items,
+        total_batches=job.total_batches,
+        completed_batches=job.completed_batches,
+        created_at=job.created_at,
+        started_at=job.started_at,
+        completed_at=job.completed_at,
+        error=job.error,
+        result=None,
+    )
 @router.get(
     "/{project_id}/sync/{job_id}",
     response_model=SyncJobStatusResponse,
