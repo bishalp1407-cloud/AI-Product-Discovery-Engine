@@ -24,6 +24,11 @@ type SyncJobStatus = {
   job_id: string;
   project_id: string;
   status: "queued" | "running" | "completed" | "failed";
+  current_stage: string | null;
+  total_items: number;
+  processed_items: number;
+  total_batches: number;
+  completed_batches: number;
   error: string | null;
   result: SyncResult | null;
 };
@@ -34,6 +39,42 @@ type SyncButtonProps = {
 
 const POLL_INTERVAL_MS = 2000;
 
+function getProgressMessage(job: SyncJobStatus): string {
+  if (job.status === "queued") {
+    return "Waiting to start...";
+  }
+
+  if (job.status !== "running") {
+    return "Sync in progress...";
+  }
+
+  switch (job.current_stage) {
+    case "ingesting":
+      if (job.total_items > 0) {
+        return `Syncing sources · ${job.processed_items}/${job.total_items}`;
+      }
+
+      return "Syncing sources...";
+
+    case "analyzing":
+      if (job.total_items > 0) {
+        return `Analyzing feedback · ${job.processed_items}/${job.total_items}`;
+      }
+
+      return "Analyzing feedback...";
+
+    case "generating_insights":
+      if (job.total_batches > 0) {
+        return `Generating insights · ${job.completed_batches}/${job.total_batches}`;
+      }
+
+      return "Generating insights...";
+
+    default:
+      return "Sync in progress...";
+  }
+}
+
 export default function SyncButton({
   projectId,
 }: SyncButtonProps) {
@@ -41,31 +82,22 @@ export default function SyncButton({
 
   const storageKey = `active-sync-job:${projectId}`;
 
-  const [activeJobId, setActiveJobId] = useState<string | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
+  /*
+   * Keep the initial state identical on the server and client.
+   *
+   * We intentionally do NOT read localStorage inside useState
+   * initializers because localStorage only exists in the browser.
+   * Reading it during the initial render can cause a React hydration
+   * mismatch.
+   *
+   * The discoverActiveJob effect below handles localStorage and
+   * backend job discovery after hydration.
+   */
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
-    return window.localStorage.getItem(storageKey);
-  });
+  const [isSyncing, setIsSyncing] = useState(false);
 
-  const [isSyncing, setIsSyncing] = useState(() => {
-    if (typeof window === "undefined") {
-      return false;
-    }
-
-    return window.localStorage.getItem(storageKey) !== null;
-  });
-
-  const [message, setMessage] = useState<string | null>(() => {
-    if (typeof window === "undefined") {
-      return null;
-    }
-
-    return window.localStorage.getItem(storageKey)
-      ? "Sync in progress..."
-      : null;
-  });
+  const [message, setMessage] = useState<string | null>(null);
 
   /*
    * Discover an active job from the backend.
@@ -92,6 +124,15 @@ export default function SyncButton({
          * That is a normal state, not an error.
          */
         if (response.status === 404) {
+          /*
+           * If there is no backend job, also make sure a stale
+           * localStorage entry does not keep the button stuck.
+           */
+          window.localStorage.removeItem(storageKey);
+          setActiveJobId(null);
+          setIsSyncing(false);
+          setMessage(null);
+
           return;
         }
 
@@ -124,8 +165,18 @@ export default function SyncButton({
 
           setActiveJobId(job.job_id);
           setIsSyncing(true);
-          setMessage("Sync in progress...");
+          setMessage(getProgressMessage(job));
+
+          return;
         }
+
+        /*
+         * If the backend reports a completed/failed job as the
+         * active job, clean up the local state.
+         */
+        window.localStorage.removeItem(storageKey);
+        setActiveJobId(null);
+        setIsSyncing(false);
       } catch (error) {
         if (cancelled) {
           return;
@@ -135,6 +186,17 @@ export default function SyncButton({
          * Failure to discover an active job should not destroy
          * an already-known local job.
          */
+        const storedJobId =
+          window.localStorage.getItem(storageKey);
+
+        if (storedJobId) {
+          setActiveJobId(storedJobId);
+          setIsSyncing(true);
+          setMessage(
+            "Unable to check sync status. Retrying...",
+          );
+        }
+
         console.error(
           "Failed to discover active sync job:",
           error,
@@ -192,7 +254,8 @@ export default function SyncButton({
           currentJob.status === "running"
         ) {
           setIsSyncing(true);
-          setMessage("Sync in progress...");
+          setMessage(getProgressMessage(currentJob));
+
           return;
         }
 
@@ -299,7 +362,7 @@ export default function SyncButton({
 
       setActiveJobId(job.job_id);
       setIsSyncing(true);
-      setMessage("Sync in progress...");
+      setMessage("Waiting to start...");
     } catch (error) {
       setIsSyncing(false);
 

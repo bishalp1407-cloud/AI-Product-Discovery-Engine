@@ -36,6 +36,13 @@ class SyncJobStatusResponse(BaseModel):
     job_id: UUID
     project_id: UUID
     status: str
+
+    current_stage: str | None = None
+    total_items: int = Field(default=0, ge=0)
+    processed_items: int = Field(default=0, ge=0)
+    total_batches: int = Field(default=0, ge=0)
+    completed_batches: int = Field(default=0, ge=0)
+
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None

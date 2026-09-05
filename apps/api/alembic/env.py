@@ -12,6 +12,7 @@ from app.models.feedback_analysis import FeedbackAnalysis
 from app.models.insight import Insight
 from app.models.insight_feedback import InsightFeedback
 from app.models.sync_job import SyncJob
+from app.models.sync_batch_log import SyncBatchLog
 
 # Alembic Config object
 config = context.config

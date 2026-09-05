@@ -1,3 +1,4 @@
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from uuid import UUID
@@ -30,6 +31,9 @@ from app.services.insight_engine_service import rebuild_project_insights
 from app.services.youtube_ingestion import ingest_youtube_feedback
 
 
+ProgressCallback = Callable[..., None]
+
+
 @dataclass
 class SourceSyncResult:
     source_id: UUID
@@ -51,7 +55,20 @@ class ProjectSyncResult:
     analyses_completed: int
     analyses_failed: int
     insights_created: int
-    sources: list[SourceSyncResult] = field(default_factory=list)
+    sources: list[SourceSyncResult] = field(
+        default_factory=list
+    )
+
+
+def _report_progress(
+    progress_callback: ProgressCallback | None,
+    **kwargs,
+) -> None:
+    """
+    Report sync progress when a callback is provided.
+    """
+    if progress_callback is not None:
+        progress_callback(**kwargs)
 
 
 def _sync_source(
@@ -63,32 +80,48 @@ def _sync_source(
 
     if source.source_type == SourceType.GOOGLE_PLAY:
         if not source.external_reference:
-            raise ValueError("Google Play source is missing external_reference.")
+            raise ValueError(
+                "Google Play source is missing external_reference."
+            )
 
         result = ingest_google_play_reviews_paginated(
             db,
             project_id=source.project_id,
             source_id=source.id,
             app_id=source.external_reference,
-            target_count=int(config.get("target_count", 100)),
-            batch_size=int(config.get("batch_size", 100)),
-            country=str(config.get("country", "in")),
-            language=str(config.get("language", "en")),
+            target_count=int(
+                config.get("target_count", 100)
+            ),
+            batch_size=int(
+                config.get("batch_size", 100)
+            ),
+            country=str(
+                config.get("country", "in")
+            ),
+            language=str(
+                config.get("language", "en")
+            ),
         )
 
         fetched = result["fetched"]
 
     elif source.source_type == SourceType.APP_STORE:
         if not source.external_reference:
-            raise ValueError("App Store source is missing external_reference.")
+            raise ValueError(
+                "App Store source is missing external_reference."
+            )
 
         result = ingest_app_store_reviews_paginated(
             db,
             project_id=source.project_id,
             source_id=source.id,
             app_id=source.external_reference,
-            target_count=int(config.get("target_count", 100)),
-            country=str(config.get("country", "in")),
+            target_count=int(
+                config.get("target_count", 100)
+            ),
+            country=str(
+                config.get("country", "in")
+            ),
         )
 
         fetched = result["fetched"]
@@ -100,16 +133,23 @@ def _sync_source(
             query = source.external_reference
 
         if not query:
-            raise ValueError("YouTube source is missing a query.")
+            raise ValueError(
+                "YouTube source is missing a query."
+            )
 
         result = ingest_youtube_feedback(
             db,
             project_id=source.project_id,
             source_id=source.id,
             query=str(query),
-            top_videos=int(config.get("top_videos", 3)),
+            top_videos=int(
+                config.get("top_videos", 3)
+            ),
             comments_per_video=int(
-                config.get("comments_per_video", 10)
+                config.get(
+                    "comments_per_video",
+                    10,
+                )
             ),
         )
 
@@ -121,7 +161,10 @@ def _sync_source(
             f"'{source.source_type.value}'."
         )
 
-    source.last_synced_at = datetime.now(timezone.utc)
+    source.last_synced_at = datetime.now(
+        timezone.utc
+    )
+
     db.commit()
     db.refresh(source)
 
@@ -142,8 +185,10 @@ def _get_feedback_needing_analysis(
 ) -> list[Feedback]:
     completed_current_analysis = exists().where(
         FeedbackAnalysis.feedback_id == Feedback.id,
-        FeedbackAnalysis.prompt_version == PROMPT_VERSION,
-        FeedbackAnalysis.analysis_status == AnalysisStatus.COMPLETED,
+        FeedbackAnalysis.prompt_version
+        == PROMPT_VERSION,
+        FeedbackAnalysis.analysis_status
+        == AnalysisStatus.COMPLETED,
     )
 
     return list(
@@ -153,7 +198,9 @@ def _get_feedback_needing_analysis(
                 Feedback.project_id == project_id,
                 ~completed_current_analysis,
             )
-            .order_by(Feedback.created_at.asc())
+            .order_by(
+                Feedback.created_at.asc()
+            )
         )
         .scalars()
         .all()
@@ -164,8 +211,12 @@ def sync_project(
     db: Session,
     *,
     project_id: UUID,
+    progress_callback: ProgressCallback | None = None,
 ) -> ProjectSyncResult | None:
-    project = db.get(Project, project_id)
+    project = db.get(
+        Project,
+        project_id,
+    )
 
     if project is None:
         return None
@@ -175,9 +226,12 @@ def sync_project(
             select(FeedbackSource)
             .where(
                 FeedbackSource.project_id == project_id,
-                FeedbackSource.status == SourceStatus.ACTIVE,
+                FeedbackSource.status
+                == SourceStatus.ACTIVE,
             )
-            .order_by(FeedbackSource.created_at.asc())
+            .order_by(
+                FeedbackSource.created_at.asc()
+            )
         )
         .scalars()
         .all()
@@ -189,7 +243,20 @@ def sync_project(
     total_created = 0
     total_duplicates = 0
 
-    for source in sources:
+    # =========================================================
+    # STAGE 1 — INGESTING
+    # =========================================================
+
+    _report_progress(
+        progress_callback,
+        current_stage="ingesting",
+        total_items=len(sources),
+        processed_items=0,
+        total_batches=0,
+        completed_batches=0,
+    )
+
+    for index, source in enumerate(sources):
         try:
             result = _sync_source(
                 db,
@@ -210,28 +277,77 @@ def sync_project(
         total_created += result.created
         total_duplicates += result.duplicates
 
-    feedback_to_analyze = _get_feedback_needing_analysis(
-        db,
-        project_id=project_id,
+        _report_progress(
+            progress_callback,
+            current_stage="ingesting",
+            processed_items=index + 1,
+        )
+
+    # =========================================================
+    # STAGE 2 — ANALYZING
+    # =========================================================
+
+    feedback_to_analyze = (
+        _get_feedback_needing_analysis(
+            db,
+            project_id=project_id,
+        )
     )
 
     analyses_completed = 0
     analyses_failed = 0
 
-    for feedback in feedback_to_analyze:
+    _report_progress(
+        progress_callback,
+        current_stage="analyzing",
+        total_items=len(feedback_to_analyze),
+        processed_items=0,
+        total_batches=0,
+        completed_batches=0,
+    )
+
+    for index, feedback in enumerate(
+        feedback_to_analyze
+    ):
         try:
             analyze_and_store_feedback(
                 db,
                 feedback=feedback,
             )
+
             analyses_completed += 1
 
         except Exception:
             analyses_failed += 1
 
+        _report_progress(
+            progress_callback,
+            current_stage="analyzing",
+            processed_items=index + 1,
+        )
+
+    # =========================================================
+    # STAGE 3 — GENERATING INSIGHTS
+    # =========================================================
+
+    _report_progress(
+        progress_callback,
+        current_stage="generating_insights",
+        total_items=0,
+        processed_items=0,
+        total_batches=1,
+        completed_batches=0,
+    )
+
     insight_result = rebuild_project_insights(
         db,
         project_id=project_id,
+    )
+
+    _report_progress(
+        progress_callback,
+        current_stage="generating_insights",
+        completed_batches=1,
     )
 
     return ProjectSyncResult(
@@ -246,6 +362,8 @@ def sync_project(
         duplicates=total_duplicates,
         analyses_completed=analyses_completed,
         analyses_failed=analyses_failed,
-        insights_created=insight_result.persisted_insight_count,
+        insights_created=(
+            insight_result.persisted_insight_count
+        ),
         sources=source_results,
     )
