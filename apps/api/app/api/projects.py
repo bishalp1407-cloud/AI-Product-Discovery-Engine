@@ -188,15 +188,20 @@ def read_active_sync_job(
         )
 
     return SyncJobStatusResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        status=job.status,
-        created_at=job.created_at,
-        started_at=job.started_at,
-        completed_at=job.completed_at,
-        error=job.error,
-        result=None,
-    )
+    job_id=job.id,
+    project_id=job.project_id,
+    status=job.status,
+    current_stage=job.current_stage,
+    total_items=job.total_items,
+    processed_items=job.processed_items,
+    total_batches=job.total_batches,
+    completed_batches=job.completed_batches,
+    created_at=job.created_at,
+    started_at=job.started_at,
+    completed_at=job.completed_at,
+    error=job.error,
+    result=None,
+)
 
 @router.post(
     "/{project_id}/sync",
@@ -281,15 +286,20 @@ def read_sync_job_status(
         )
 
     return SyncJobStatusResponse(
-        job_id=job.id,
-        project_id=job.project_id,
-        status=job.status,
-        created_at=job.created_at,
-        started_at=job.started_at,
-        completed_at=job.completed_at,
-        error=job.error,
-        result=result,
-    )
+    job_id=job.id,
+    project_id=job.project_id,
+    status=job.status,
+    current_stage=job.current_stage,
+    total_items=job.total_items,
+    processed_items=job.processed_items,
+    total_batches=job.total_batches,
+    completed_batches=job.completed_batches,
+    created_at=job.created_at,
+    started_at=job.started_at,
+    completed_at=job.completed_at,
+    error=job.error,
+    result=result,
+)
 @router.get(
     "/{project_id}/analytics",
     response_model=ProjectAnalyticsResponse,

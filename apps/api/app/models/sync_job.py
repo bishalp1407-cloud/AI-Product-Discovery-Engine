@@ -4,6 +4,7 @@ from datetime import datetime
 from sqlalchemy import (
     DateTime,
     ForeignKey,
+    Integer,
     String,
     Text,
 )
@@ -36,6 +37,35 @@ class SyncJob(Base):
         String(20),
         nullable=False,
         index=True,
+    )
+
+    current_stage: Mapped[str | None] = mapped_column(
+        String(30),
+        nullable=True,
+    )
+
+    total_items: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    processed_items: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    total_batches: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
+    )
+
+    completed_batches: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=0,
     )
 
     result: Mapped[dict | None] = mapped_column(

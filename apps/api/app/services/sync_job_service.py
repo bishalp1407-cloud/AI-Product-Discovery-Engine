@@ -1,6 +1,7 @@
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from enum import Enum
+from typing import Callable
 from uuid import UUID
 
 from sqlalchemy import select
@@ -19,6 +20,7 @@ class SyncJobStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
 
+
 def mark_stale_sync_jobs() -> int:
     """
     Mark long-running sync jobs as failed.
@@ -29,11 +31,15 @@ def mark_stale_sync_jobs() -> int:
     db = SessionLocal()
 
     try:
-        cutoff = datetime.now(timezone.utc) - STALE_JOB_TIMEOUT
+        cutoff = (
+            datetime.now(timezone.utc)
+            - STALE_JOB_TIMEOUT
+        )
 
         stale_jobs = db.scalars(
             select(SyncJob).where(
-                SyncJob.status == SyncJobStatus.RUNNING.value,
+                SyncJob.status
+                == SyncJobStatus.RUNNING.value,
                 SyncJob.started_at.is_not(None),
                 SyncJob.started_at < cutoff,
             )
@@ -41,8 +47,12 @@ def mark_stale_sync_jobs() -> int:
 
         for job in stale_jobs:
             job.status = SyncJobStatus.FAILED.value
-            job.completed_at = datetime.now(timezone.utc)
-            job.error = "Sync interrupted before completion."
+            job.completed_at = datetime.now(
+                timezone.utc
+            )
+            job.error = (
+                "Sync interrupted before completion."
+            )
 
         db.commit()
 
@@ -54,8 +64,6 @@ def mark_stale_sync_jobs() -> int:
 
     finally:
         db.close()
-
-
 
 
 def create_sync_job(
@@ -87,7 +95,9 @@ def create_sync_job(
                     ]
                 ),
             )
-            .order_by(SyncJob.created_at.desc())
+            .order_by(
+                SyncJob.created_at.desc()
+            )
         )
 
         if existing_job is not None:
@@ -97,7 +107,9 @@ def create_sync_job(
         job = SyncJob(
             project_id=project_id,
             status=SyncJobStatus.QUEUED.value,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(
+                timezone.utc
+            ),
         )
 
         db.add(job)
@@ -140,6 +152,7 @@ def get_sync_job(
     finally:
         db.close()
 
+
 def get_active_sync_job(
     *,
     project_id: UUID,
@@ -163,14 +176,69 @@ def get_active_sync_job(
                     ]
                 ),
             )
-            .order_by(SyncJob.created_at.desc())
+            .order_by(
+                SyncJob.created_at.desc()
+            )
         )
 
         if job is None:
             return None
 
         db.expunge(job)
+
         return job
+
+    finally:
+        db.close()
+
+
+def _update_job_progress(
+    *,
+    job_id: UUID,
+    current_stage: str | None = None,
+    total_items: int | None = None,
+    processed_items: int | None = None,
+    total_batches: int | None = None,
+    completed_batches: int | None = None,
+) -> None:
+    """
+    Persist observable progress for a sync job.
+
+    Only supplied fields are changed. This allows individual
+    stages to update the fields they own without resetting
+    progress from other stages.
+    """
+    db = SessionLocal()
+
+    try:
+        job = db.get(
+            SyncJob,
+            job_id,
+        )
+
+        if job is None:
+            return
+
+        if current_stage is not None:
+            job.current_stage = current_stage
+
+        if total_items is not None:
+            job.total_items = total_items
+
+        if processed_items is not None:
+            job.processed_items = processed_items
+
+        if total_batches is not None:
+            job.total_batches = total_batches
+
+        if completed_batches is not None:
+            job.completed_batches = completed_batches
+
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
 
     finally:
         db.close()
@@ -194,14 +262,26 @@ def run_sync_job(
     db = SessionLocal()
 
     try:
-        job = db.get(SyncJob, job_id)
+        job = db.get(
+            SyncJob,
+            job_id,
+        )
 
         if job is None:
             return
 
-        job.status = SyncJobStatus.RUNNING.value
-        job.started_at = datetime.now(timezone.utc)
+        job.status = (
+            SyncJobStatus.RUNNING.value
+        )
+        job.started_at = datetime.now(
+            timezone.utc
+        )
         job.error = None
+        job.current_stage = "starting"
+        job.total_items = 0
+        job.processed_items = 0
+        job.total_batches = 0
+        job.completed_batches = 0
 
         project_id = job.project_id
 
@@ -215,7 +295,28 @@ def run_sync_job(
         db.close()
 
     # ---------------------------------------------------------
-    # Run the actual sync in its own database session
+    # Progress callback
+    # ---------------------------------------------------------
+
+    def report_progress(
+        *,
+        current_stage: str | None = None,
+        total_items: int | None = None,
+        processed_items: int | None = None,
+        total_batches: int | None = None,
+        completed_batches: int | None = None,
+    ) -> None:
+        _update_job_progress(
+            job_id=job_id,
+            current_stage=current_stage,
+            total_items=total_items,
+            processed_items=processed_items,
+            total_batches=total_batches,
+            completed_batches=completed_batches,
+        )
+
+    # ---------------------------------------------------------
+    # Run actual sync
     # ---------------------------------------------------------
 
     sync_db = SessionLocal()
@@ -224,20 +325,27 @@ def run_sync_job(
         result = sync_project(
             sync_db,
             project_id=project_id,
+            progress_callback=report_progress,
         )
 
         if result is None:
-            raise ValueError("Project not found.")
+            raise ValueError(
+                "Project not found."
+            )
 
-        # Convert nested dataclasses into JSON-compatible data.
         result_data = asdict(result)
 
-        # UUID objects are not JSON serializable, so convert them
-        # explicitly before writing the JSONB payload.
-        result_data["project_id"] = str(result.project_id)
+        result_data["project_id"] = str(
+            result.project_id
+        )
 
-        for source in result_data.get("sources", []):
-            source["source_id"] = str(source["source_id"])
+        for source in result_data.get(
+            "sources",
+            [],
+        ):
+            source["source_id"] = str(
+                source["source_id"]
+            )
 
         # -----------------------------------------------------
         # Persist successful completion
@@ -246,14 +354,22 @@ def run_sync_job(
         status_db = SessionLocal()
 
         try:
-            job = status_db.get(SyncJob, job_id)
+            job = status_db.get(
+                SyncJob,
+                job_id,
+            )
 
             if job is None:
                 return
 
             job.result = result_data
-            job.status = SyncJobStatus.COMPLETED.value
-            job.completed_at = datetime.now(timezone.utc)
+            job.status = (
+                SyncJobStatus.COMPLETED.value
+            )
+            job.current_stage = "completed"
+            job.completed_at = datetime.now(
+                timezone.utc
+            )
             job.error = None
 
             status_db.commit()
@@ -265,7 +381,7 @@ def run_sync_job(
         finally:
             status_db.close()
 
-    except Exception:
+    except Exception as exc:
         sync_db.rollback()
 
         # -----------------------------------------------------
@@ -275,12 +391,20 @@ def run_sync_job(
         status_db = SessionLocal()
 
         try:
-            job = status_db.get(SyncJob, job_id)
+            job = status_db.get(
+                SyncJob,
+                job_id,
+            )
 
             if job is not None:
-                job.status = SyncJobStatus.FAILED.value
-                job.error = "Sync failed. Please try again."
-                job.completed_at = datetime.now(timezone.utc)
+                job.status = (
+                    SyncJobStatus.FAILED.value
+                )
+                job.current_stage = "failed"
+                job.error = str(exc)
+                job.completed_at = datetime.now(
+                    timezone.utc
+                )
 
                 status_db.commit()
 
